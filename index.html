@@ -60,7 +60,7 @@
       fiber:a.fiber+(e.fiber||0), sodium:a.sodium+(e.sodium||0), sugar:a.sugar+(e.sugar||0),
     }), {calories:0,protein:0,carbs:0,fat:0,fiber:0,sodium:0,sugar:0});
 
-    const USDA_KEY = "DEMO_KEY"; // free demo key — get your own at https://fdc.nal.usda.gov/api-key-signup
+    const USDA_KEY = "REPLACE_ME_WITH_REAL_KEY"; // free demo key — get your own at https://fdc.nal.usda.gov/api-key-signup
 
     const store = {
       get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
