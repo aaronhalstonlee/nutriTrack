@@ -2,7 +2,7 @@
   "name": "NutriTrack",
   "short_name": "NutriTrack",
   "description": "Calorie & Nutrient Tracker",
-  "start_url": ".",
+  "start_url": "/nutriTrack/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f9fafb",
