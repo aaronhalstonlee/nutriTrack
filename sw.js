@@ -2,7 +2,7 @@ const CACHE = "nutritrack-v1";
 const SHELL = [
   "./", 
   "./index.html",
-  "https://tailwindcss.com",
+  "https://cdn.tailwindcss.com",
   "https://unpkg.com"
 ];
 
@@ -25,8 +25,10 @@ self.addEventListener("fetch", e => {
            (e.request.url.includes("openfoodfacts.org") ||
             e.request.url.includes("unpkg.com") ||
             e.request.url.includes("tailwindcss.com"))) {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
+          if(res.status == 200){
+            const clone = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, clone));
+          }
         }
         return res;
       });
