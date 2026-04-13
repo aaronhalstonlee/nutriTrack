@@ -1,5 +1,10 @@
 const CACHE = "nutritrack-v1";
-const SHELL = ["./", "./index.html"];
+const SHELL = [
+  "./", 
+  "./index.html",
+  "https://tailwindcss.com",
+  "https://unpkg.com"
+];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
@@ -11,20 +16,20 @@ self.addEventListener("activate", e => {
   ));
   self.clients.claim();
 });
+
 self.addEventListener("fetch", e => {
-  if (e.request.url.includes("openfoodfacts.org") ||
-      e.request.url.includes("unpkg.com") ||
-      e.request.url.includes("tailwindcss.com")) {
-    e.respondWith(
-      caches.match(e.request).then(cached => cached ||
-        fetch(e.request).then(res => {
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      return cached || fetch(e.request).then(res => {
+        if(e.request.method == 'GET' &&
+           (e.request.url.includes("openfoodfacts.org") ||
+            e.request.url.includes("unpkg.com") ||
+            e.request.url.includes("tailwindcss.com"))) {
           const clone = res.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone));
-          return res;
-        })
-      )
-    );
-    return;
-  }
-  e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
+        }
+        return res;
+      });
+    })
+  );
 });
