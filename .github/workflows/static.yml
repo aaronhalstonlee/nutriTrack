@@ -23,7 +23,7 @@ jobs:
       # THIS STEP INJECTS YOUR KEY
       - name: Inject API Key
         run: |
-          find . name "*.html" -exec sed -i 's/REPLACE_ME_WITH_REAL_KEY/${{ secrets.API_KEY }}/g' {} +
+          find . name "index.html" -exec sed -i 's/REPLACE_ME_WITH_REAL_KEY/${{ secrets.API_KEY }}/g' {} +
           # Repeat the line above for any other files that need the key
 
       - name: Setup Pages
