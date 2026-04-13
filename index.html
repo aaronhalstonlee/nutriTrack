@@ -182,7 +182,7 @@
         setLoading(true);setError("");setResults([]);
         try {
           const [usdaRes, offRes] = await Promise.allSettled([
-            fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS),Branded`).then(r=>r.json()),
+            fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29&dataType=Branded`).then(r=>r.json()),
             fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&json=1&page_size=10&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
           ]);
 
