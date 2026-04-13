@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>NutriTrack</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#10b981" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="NutriTrack" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/recharts/umd/Recharts.js"></script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; overscroll-behavior: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    #install-banner { display: none; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <div id="install-banner" class="fixed bottom-0 left-0 right-0 bg-emerald-500 text-white p-3 flex items-center justify-between z-50 shadow-xl safe-bottom">
+    <div>
+      <p class="font-bold text-sm">📲 Install NutriTrack</p>
+      <p class="text-xs opacity-75">Add to home screen for offline access</p>
+    </div>
+    <div class="flex gap-2 items-center">
+      <button id="install-btn" class="bg-white text-emerald-600 font-bold text-sm px-3 py-1.5 rounded-lg">Install</button>
+      <button id="dismiss-btn" class="text-white opacity-60 text-xl px-1">✕</button>
+    </div>
+  </div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+    const { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } = Recharts;
+
+    const DEF_GOALS = { calories:2000, protein:50, carbs:275, fat:78, fiber:28, sugar:50, sodium:2300 };
+    const MEALS = ["Breakfast","Lunch","Dinner","Snack"];
+    const MI = { Breakfast:"🌅", Lunch:"☀️", Dinner:"🌙", Snack:"🍎" };
+    const MC = ["#60a5fa","#fbbf24","#f87171"];
+
+    const todayStr = () => new Date().toISOString().slice(0,10);
+    const last7 = () => Array.from({length:7},(_,i)=>{
+      const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10);
+    });
+    const sumLog = es => es.reduce((a,e)=>({
+      calories:a.calories+(e.calories||0), protein:a.protein+(e.protein||0),
+      carbs:a.carbs+(e.carbs||0), fat:a.fat+(e.fat||0),
+      fiber:a.fiber+(e.fiber||0), sodium:a.sodium+(e.sodium||0), sugar:a.sugar+(e.sugar||0),
+    }), {calories:0,protein:0,carbs:0,fat:0,fiber:0,sodium:0,sugar:0});
+
+    const store = {
+      get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
+      set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
+    };
+
+    function MiniBar({label,value,goal,color}) {
+      const pct=Math.min(100,(value/goal)*100), over=value>goal;
+      return (
+        <div>
+          <div className="flex justify-between text-xs mb-0.5">
+            <span className="text-gray-600">{label}</span>
+            <span className={over?"text-red-500 font-bold":"text-gray-400"}>{Math.round(value)}/{goal}</span>
+          </div>
+          <div className="h-1.5 bg-gray-100 rounded-full">
+            <div className={`h-full rounded-full transition-all ${over?"bg-red-400":color}`} style={{width:`${pct}%`}}/>
+          </div>
+        </div>
+      );
+    }
+
+    function FoodCard({item,meal,onAdd}) {
+      const [qty,setQty]=useState(100);
+      const n=item.nutriments||{}, f=qty/100;
+      const cal=Math.round((n["energy-kcal_100g"]||0)*f);
+      return (
+        <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+          <div className="flex justify-between gap-2 mb-1">
+            <div className="min-w-0">
+              <p className="font-semibold text-sm text-gray-800 truncate">{item.product_name}</p>
+              <p className="text-xs text-gray-400 truncate">{item.brands||""}</p>
+            </div>
+            <span className="text-xs bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-full h-fit whitespace-nowrap shrink-0">{cal} kcal</span>
+          </div>
+          <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mb-2">
+            {[["P","proteins_100g","text-blue-500"],["C","carbohydrates_100g","text-yellow-500"],["F","fat_100g","text-red-400"],["Fi","fiber_100g","text-green-500"],["Su","sugars_100g","text-pink-400"]].map(([l,k,c])=>(
+              <span key={l}>{l} <b className={c}>{((n[k]||0)*f).toFixed(1)}g</b></span>
+            ))}
+            <span>Na <b className="text-purple-400">{Math.round((n.sodium_100g||0)*f*1000)}mg</b></span>
+          </div>
+          <div className="flex gap-2">
+            <div className="flex flex-1 border border-gray-200 rounded-lg overflow-hidden">
+              <input type="number" min="1" max="2000" value={qty}
+                onChange={e=>setQty(Math.max(1,Number(e.target.value)))}
+                className="flex-1 px-2 py-1.5 text-sm outline-none min-w-0"/>
+              <span className="text-xs text-gray-400 px-2 bg-gray-50 flex items-center border-l border-gray-200">g</span>
+            </div>
+            <button onClick={()=>onAdd(item,qty)}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap">
+              + {MI[meal]} {meal}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const [tab,setTab]=useState("search");
+      const [query,setQuery]=useState("");
+      const [results,setResults]=useState([]);
+      const [loading,setLoading]=useState(false);
+      const [error,setError]=useState("");
+      const [meal,setMeal]=useState("Breakfast");
+      const [log,setLog]=useState([]);
+      const [history,setHistory]=useState({});
+      const [goals,setGoals]=useState(DEF_GOALS);
+      const [goalDraft,setGoalDraft]=useState(DEF_GOALS);
+      const [showScanner,setShowScanner]=useState(false);
+      const [scanMode,setScanMode]=useState("camera");
+      const [barcodeInput,setBarcodeInput]=useState("");
+      const [toast,setToast]=useState("");
+      const [offline,setOffline]=useState(!navigator.onLine);
+      const videoRef=useRef(null);
+      const streamRef=useRef(null);
+
+      useEffect(()=>{
+        const g=store.get("ntr-goals"); if(g){setGoals(g);setGoalDraft(g);}
+        const l=store.get(`ntr-log-${todayStr()}`); if(l) setLog(l);
+        const on=()=>setOffline(false), off=()=>setOffline(true);
+        window.addEventListener("online",on); window.addEventListener("offline",off);
+        return ()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
+      },[]);
+
+      useEffect(()=>{
+        if(tab!=="history") return;
+        const h={};
+        for(const d of last7()) h[d]=store.get(`ntr-log-${d}`)||[];
+        h[todayStr()]=log; setHistory(h);
+      },[tab,log]);
+
+      const saveLog=nl=>{setLog(nl);store.set(`ntr-log-${todayStr()}`,nl);};
+      const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
+
+      const doSearch=async q=>{
+        if(!q.trim()) return;
+        setLoading(true);setError("");setResults([]);
+        try {
+          const r=await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&json=1&page_size=15&fields=product_name,brands,nutriments,code`);
+          const d=await r.json();
+          const f=(d.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]);
+          setResults(f); if(!f.length) setError("No results found.");
+        } catch {setError("Search failed.");}
+        setLoading(false);
+      };
+
+      const lookupBarcode=async code=>{
+        setLoading(true);
+        try {
+          const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+          const d=await r.json();
+          if(d.status===1&&d.product?.nutriments?.["energy-kcal_100g"]){
+            setResults([d.product]);setTab("search");setShowScanner(false);
+            showToast(`Found: ${d.product.product_name}`);
+          } else setError("Product not found.");
+        } catch {setError("Lookup failed.");}
+        setLoading(false);setShowScanner(false);
+      };
+
+      useEffect(()=>{
+        if(!showScanner||scanMode!=="camera") return;
+        let stream,interval;
+        (async()=>{
+          if(!("BarcodeDetector" in window)){setScanMode("manual");return;}
+          try {
+            stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+            streamRef.current=stream;
+            if(videoRef.current) videoRef.current.srcObject=stream;
+            const det=new window.BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});
+            interval=setInterval(async()=>{
+              if(!videoRef.current) return;
+              try{const c=await det.detect(videoRef.current);if(c.length>0){clearInterval(interval);stream.getTracks().forEach(t=>t.stop());lookupBarcode(c[0].rawValue);}}catch{}
+            },600);
+          } catch {setScanMode("manual");}
+        })();
+        return ()=>{clearInterval(interval);stream?.getTracks().forEach(t=>t.stop());};
+      },[showScanner,scanMode]);
+
+      const videoCallback=useCallback(node=>{
+        videoRef.current=node;if(node&&streamRef.current) node.srcObject=streamRef.current;
+      },[]);
+
+      const addFood=(item,qty)=>{
+        const n=item.nutriments||{},f=qty/100;
+        const e={
+          id:Date.now(),name:item.product_name,brand:item.brands||"",meal,qty,
+          calories:Math.round((n["energy-kcal_100g"]||0)*f),
+          protein:+((n.proteins_100g||0)*f).toFixed(1),
+          carbs:+((n.carbohydrates_100g||0)*f).toFixed(1),
+          fat:+((n.fat_100g||0)*f).toFixed(1),
+          fiber:+((n.fiber_100g||0)*f).toFixed(1),
+          sodium:Math.round((n.sodium_100g||0)*f*1000),
+          sugar:+((n.sugars_100g||0)*f).toFixed(1),
+          time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+        };
+        saveLog([...log,e]);
+        showToast(`${MI[meal]} ${e.name} — ${e.calories} kcal`);
+        setTab("today");
+      };
+
+      const totals=sumLog(log), calLeft=goals.calories-totals.calories;
+      const macroData=[
+        {name:"Protein",value:Math.round(totals.protein*4),grams:totals.protein},
+        {name:"Carbs",value:Math.round(totals.carbs*4),grams:totals.carbs},
+        {name:"Fat",value:Math.round(totals.fat*9),grams:totals.fat},
+      ].filter(d=>d.value>0);
+
+      return (
+        <div className="min-h-screen bg-gray-50 flex flex-col max-w-lg mx-auto">
+          {offline&&<div className="bg-yellow-400 text-yellow-900 text-xs text-center py-1.5 font-semibold">📵 Offline — search unavailable</div>}
+
+          {/* Header */}
+          <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-3 sticky top-0 z-20 shadow-sm">
+            <div className="flex justify-between items-center mb-2">
+              <div>
+                <h1 className="text-lg font-bold text-gray-900">🥗 NutriTrack</h1>
+                <p className="text-xs text-gray-400">{todayStr()}</p>
+              </div>
+              <div className={`text-right ${calLeft<0?"text-red-500":"text-emerald-600"}`}>
+                <p className="text-2xl font-black leading-none">{Math.abs(calLeft)}</p>
+                <p className="text-xs">{calLeft<0?"kcal over":"kcal left"}</p>
+              </div>
+            </div>
+            <MiniBar label="Calories" value={totals.calories} goal={goals.calories} color="bg-orange-400"/>
+            <div className="grid grid-cols-3 gap-2 mt-1.5">
+              <MiniBar label="Protein" value={totals.protein} goal={goals.protein} color="bg-blue-400"/>
+              <MiniBar label="Carbs" value={totals.carbs} goal={goals.carbs} color="bg-yellow-400"/>
+              <MiniBar label="Fat" value={totals.fat} goal={goals.fat} color="bg-red-400"/>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex bg-white border-b border-gray-200 sticky top-28 z-10">
+            {[["search","🔍 Search"],["today","📋 Today"],["history","📊 History"],["settings","⚙️ Goals"]].map(([t,l])=>(
+              <button key={t} onClick={()=>setTab(t)}
+                className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab===t?"border-b-2 border-emerald-500 text-emerald-600":"text-gray-400"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto pb-20">
+
+            {/* SEARCH */}
+            {tab==="search"&&(
+              <div className="p-4">
+                <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1">
+                  {MEALS.map(m=>(
+                    <button key={m} onClick={()=>setMeal(m)}
+                      className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${meal===m?"bg-emerald-500 text-white":"bg-gray-100 text-gray-500"}`}>
+                      {MI[m]} {m}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 mb-3">
+                  <input value={query} onChange={e=>setQuery(e.target.value)}
+                    onKeyDown={e=>e.key==="Enter"&&doSearch(query)}
+                    placeholder="Search foods…"
+                    className="flex-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-emerald-400 bg-white"/>
+                  <button onClick={()=>doSearch(query)} disabled={loading||offline}
+                    className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-4 rounded-xl font-bold text-sm">
+                    {loading?"…":"Go"}
+                  </button>
+                  <button onClick={()=>{setScanMode("camera");setShowScanner(true);}}
+                    className="bg-gray-100 hover:bg-gray-200 px-3 rounded-xl text-xl">📷</button>
+                </div>
+                {error&&<p className="text-red-500 text-sm text-center py-2">{error}</p>}
+                {loading&&<div className="flex justify-center py-10"><div className="w-7 h-7 border-4 border-emerald-200 border-t-emerald-500 rounded-full animate-spin"/></div>}
+                <div className="flex flex-col gap-2.5">
+                  {results.map(item=><FoodCard key={item.code||item.product_name} item={item} meal={meal} onAdd={addFood}/>)}
+                </div>
+                {!loading&&!results.length&&!error&&(
+                  <div className="text-center text-gray-400 py-16">
+                    <p className="text-4xl mb-2">🔍</p>
+                    <p className="font-medium text-sm">Search 3M+ foods</p>
+                    <p className="text-xs mt-1">or tap 📷 to scan a barcode</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TODAY */}
+            {tab==="today"&&(
+              <div className="p-4">
+                {log.length===0?(
+                  <div className="text-center text-gray-400 py-16">
+                    <p className="text-4xl mb-2">🍽️</p>
+                    <p className="font-medium text-sm">Nothing logged yet today</p>
+                  </div>
+                ):(
+                  <>
+                    {macroData.length>0&&(
+                      <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3 shadow-sm">
+                        <p className="font-semibold text-sm text-gray-700 mb-2">Macro Breakdown</p>
+                        <div className="flex items-center gap-4">
+                          <div style={{width:120,height:120,flexShrink:0}}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <PieChart>
+                                <Pie data={macroData} cx="50%" cy="50%" innerRadius={32} outerRadius={52} dataKey="value" paddingAngle={3}>
+                                  {macroData.map((_,i)=><Cell key={i} fill={MC[i]}/>)}
+                                </Pie>
+                                <Tooltip formatter={(v,n,p)=>[`${p.payload.grams}g (${v} kcal)`,n]}/>
+                              </PieChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {macroData.map((d,i)=>(
+                              <div key={d.name} className="flex items-center gap-2 mb-2">
+                                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{background:MC[i]}}/>
+                                <span className="text-xs text-gray-600 flex-1">{d.name}</span>
+                                <span className="text-xs font-bold text-gray-800">{d.grams}g</span>
+                              </div>
+                            ))}
+                            <div className="pt-2 border-t border-gray-100">
+                              <p className="text-xs text-gray-400">Total <b className="text-gray-700">{totals.calories} kcal</b></p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3 shadow-sm">
+                      <p className="font-semibold text-sm text-gray-700 mb-3">Micronutrients</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          {label:"Fiber",val:totals.fiber,unit:"g",goal:goals.fiber,color:"bg-green-400",emoji:"🌾"},
+                          {label:"Sugar",val:totals.sugar,unit:"g",goal:goals.sugar,color:"bg-pink-400",emoji:"🍬"},
+                          {label:"Sodium",val:totals.sodium,unit:"mg",goal:goals.sodium,color:"bg-purple-400",emoji:"🧂"},
+                        ].map(m=>{
+                          const pct=Math.min(100,(m.val/m.goal)*100),over=m.val>m.goal;
+                          return (
+                            <div key={m.label} className={`rounded-xl p-2.5 ${over?"bg-red-50":"bg-gray-50"}`}>
+                              <p className="text-base mb-0.5">{m.emoji}</p>
+                              <p className="text-xs text-gray-500">{m.label}</p>
+                              <p className={`text-sm font-bold ${over?"text-red-500":"text-gray-800"}`}>
+                                {Math.round(m.val)}<span className="text-xs font-normal text-gray-400">{m.unit}</span>
+                              </p>
+                              <div className="h-1 bg-gray-200 rounded-full mt-1">
+                                <div className={`h-full rounded-full ${over?"bg-red-400":m.color}`} style={{width:`${pct}%`}}/>
+                              </div>
+                              <p className="text-xs text-gray-400 mt-0.5">/{m.goal}{m.unit}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    {MEALS.map(m=>{
+                      const items=log.filter(e=>e.meal===m); if(!items.length) return null;
+                      const mCal=items.reduce((a,e)=>a+e.calories,0);
+                      return (
+                        <div key={m} className="bg-white rounded-2xl border border-gray-100 p-3 mb-2.5 shadow-sm">
+                          <div className="flex justify-between items-center mb-2">
+                            <p className="font-semibold text-sm text-gray-700">{MI[m]} {m}</p>
+                            <span className="text-xs text-gray-400">{mCal} kcal</span>
+                          </div>
+                          {items.map(e=>(
+                            <div key={e.id} className="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm text-gray-800 font-medium truncate">{e.name}</p>
+                                <p className="text-xs text-gray-400">{e.qty}g · {e.time} · P{e.protein} C{e.carbs} F{e.fat}g</p>
+                              </div>
+                              <span className="text-sm font-bold text-orange-500 shrink-0">{e.calories}</span>
+                              <button onClick={()=>saveLog(log.filter(x=>x.id!==e.id))} className="text-gray-300 hover:text-red-400 text-base">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    <button onClick={()=>saveLog([])} className="w-full text-xs text-gray-400 hover:text-red-400 py-2 mt-1">🗑 Clear today's log</button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* HISTORY */}
+            {tab==="history"&&(
+              <div className="p-4">
+                <p className="font-semibold text-sm text-gray-700 mb-3">Weekly Overview</p>
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-3 shadow-sm">
+                  <ResponsiveContainer width="100%" height={170}>
+                    <BarChart data={last7().map(d=>({day:d.slice(5).replace("-","/"),calories:sumLog(history[d]||[]).calories}))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/>
+                      <XAxis dataKey="day" tick={{fontSize:10}}/>
+                      <YAxis tick={{fontSize:10}} domain={[0,goals.calories*1.4]} width={35}/>
+                      <Tooltip formatter={v=>[`${v} kcal`,"Calories"]}/>
+                      <ReferenceLine y={goals.calories} stroke="#34d399" strokeDasharray="4 4"/>
+                      <Bar dataKey="calories" fill="#34d399" radius={[4,4,0,0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-4 shadow-sm">
+                  <p className="font-semibold text-sm text-gray-700 mb-2">Weekly Macros</p>
+                  <ResponsiveContainer width="100%" height={140}>
+                    <BarChart data={last7().map(d=>{const t=sumLog(history[d]||[]);return{day:d.slice(5).replace("-","/"),Protein:Math.round(t.protein),Carbs:Math.round(t.carbs),Fat:Math.round(t.fat)};})}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/>
+                      <XAxis dataKey="day" tick={{fontSize:10}}/>
+                      <YAxis tick={{fontSize:10}} width={30}/>
+                      <Tooltip/>
+                      <Bar dataKey="Protein" stackId="a" fill="#60a5fa"/>
+                      <Bar dataKey="Carbs" stackId="a" fill="#fbbf24"/>
+                      <Bar dataKey="Fat" stackId="a" fill="#f87171" radius={[4,4,0,0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {last7().slice().reverse().map(d=>{
+                  const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr();
+                  return (
+                    <div key={d} className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm ${isToday?"border-emerald-200":"border-gray-100"}`}>
+                      <div className="flex justify-between items-center mb-1">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
+                          <p className="text-xs text-gray-400">{entries.length} items</p>
+                        </div>
+                        <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
+                          <p className="font-black text-lg leading-none">{t.calories}</p>
+                          <p className="text-xs text-gray-400">kcal</p>
+                        </div>
+                      </div>
+                      {entries.length>0&&(
+                        <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
+                          <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
+                          <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
+                          <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
+                          <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* SETTINGS */}
+            {tab==="settings"&&(
+              <div className="p-4">
+                <p className="font-semibold text-sm text-gray-700 mb-1">Daily Goals</p>
+                <p className="text-xs text-gray-400 mb-4">Set your personal targets</p>
+                {[
+                  {key:"calories",label:"🔥 Calories",unit:"kcal"},
+                  {key:"protein",label:"💪 Protein",unit:"g"},
+                  {key:"carbs",label:"🌾 Carbs",unit:"g"},
+                  {key:"fat",label:"🥑 Fat",unit:"g"},
+                  {key:"fiber",label:"🥦 Fiber",unit:"g"},
+                  {key:"sugar",label:"🍬 Sugar (max)",unit:"g"},
+                  {key:"sodium",label:"🧂 Sodium (max)",unit:"mg"},
+                ].map(({key,label,unit})=>(
+                  <div key={key} className="bg-white rounded-xl border border-gray-100 px-4 py-3 mb-2 flex items-center justify-between shadow-sm">
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{label}</p>
+                      <p className="text-xs text-gray-400">{unit}/day</p>
+                    </div>
+                    <input type="number" value={goalDraft[key]}
+                      onChange={e=>setGoalDraft(g=>({...g,[key]:Number(e.target.value)}))}
+                      className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm text-right outline-none focus:border-emerald-400"/>
+                  </div>
+                ))}
+                <button onClick={()=>{setGoals(goalDraft);store.set("ntr-goals",goalDraft);showToast("Goals saved! ✓");}}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-bold text-sm mt-3">Save Goals</button>
+                <button onClick={()=>setGoalDraft(DEF_GOALS)} className="w-full text-gray-400 py-2.5 text-sm mt-1">Reset to defaults</button>
+              </div>
+            )}
+          </div>
+
+          {/* Scanner Modal */}
+          {showScanner&&(
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{background:"rgba(0,0,0,0.75)"}}>
+              <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+                <div className="flex justify-between items-center px-4 py-3 border-b border-gray-100">
+                  <p className="font-bold text-gray-800">📷 Barcode Scanner</p>
+                  <button onClick={()=>setShowScanner(false)} className="text-gray-400 text-xl font-bold">✕</button>
+                </div>
+                {scanMode==="camera"?(
+                  <div>
+                    <div className="relative bg-gray-900">
+                      <video ref={videoCallback} autoPlay playsInline muted className="w-full object-cover" style={{aspectRatio:"16/9"}}/>
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="border-2 border-emerald-400 w-48 h-24 rounded-lg opacity-80"/>
+                      </div>
+                    </div>
+                    <p className="text-center text-xs text-gray-500 py-3">Point at a barcode — auto detects</p>
+                    <div className="px-4 pb-4 text-center">
+                      <button onClick={()=>setScanMode("manual")} className="text-xs text-emerald-600 underline">Enter manually</button>
+                    </div>
+                  </div>
+                ):(
+                  <div className="p-4">
+                    <p className="text-sm text-gray-600 mb-3">Enter the barcode number:</p>
+                    <input value={barcodeInput} onChange={e=>setBarcodeInput(e.target.value)}
+                      onKeyDown={e=>e.key==="Enter"&&lookupBarcode(barcodeInput)}
+                      placeholder="e.g. 3017620422003"
+                      className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-emerald-400 mb-3"/>
+                    <button onClick={()=>lookupBarcode(barcodeInput)} disabled={!barcodeInput.trim()||loading}
+                      className="w-full bg-emerald-500 disabled:opacity-50 text-white py-2.5 rounded-xl font-bold text-sm">
+                      {loading?"Looking up…":"Look Up Product"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {toast&&(
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-xl z-50 whitespace-nowrap">
+              {toast}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+
+  <script>
+    // PWA install prompt
+    let deferredPrompt;
+    const banner = document.getElementById("install-banner");
+    window.addEventListener("beforeinstallprompt", e => {
+      e.preventDefault(); deferredPrompt = e;
+      if (!localStorage.getItem("pwa-dismissed")) banner.style.display = "flex";
+    });
+    document.getElementById("install-btn").addEventListener("click", async () => {
+      banner.style.display = "none";
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      deferredPrompt = null;
+    });
+    document.getElementById("dismiss-btn").addEventListener("click", () => {
+      banner.style.display = "none";
+      localStorage.setItem("pwa-dismissed", "1");
+    });
+    window.addEventListener("appinstalled", () => { banner.style.display = "none"; });
+
+    // Service Worker
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js")
+          .then(r => console.log("SW:", r.scope))
+          .catch(e => console.warn("SW failed:", e));
+      });
+    }
+  </script>
+</body>
+</html>
