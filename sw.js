@@ -7,30 +7,25 @@ const SHELL = [
 ];
 
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
+  e.waitUntil(
+    caches.open(CACHE).then(c => {
+      return Promise.allSettled(SHELL.map(url => c.add(url)));
+    })
+  );          
   self.skipWaiting();
-});
-self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-  ));
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", e => {
   e.respondWith(
     caches.match(e.request).then(cached => {
       return cached || fetch(e.request).then(res => {
-        if(e.request.method == 'GET' &&
-           (e.request.url.includes("openfoodfacts.org") ||
-            e.request.url.includes("unpkg.com") ||
-            e.request.url.includes("tailwindcss.com"))) {
-          if(res.status == 200){
-            const clone = res.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
-          }
+        if(e.request.method == 'GET' && res.status == 200){
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
         }
         return res;
+      }).catch(() => {
+        return caches.match("./index.html");
       });
     })
   );
