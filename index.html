@@ -60,10 +60,35 @@
       fiber:a.fiber+(e.fiber||0), sodium:a.sodium+(e.sodium||0), sugar:a.sugar+(e.sugar||0),
     }), {calories:0,protein:0,carbs:0,fat:0,fiber:0,sodium:0,sugar:0});
 
+    const USDA_KEY = "DEMO_KEY"; // free demo key — get your own at https://fdc.nal.usda.gov/api-key-signup
+
     const store = {
       get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
       set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
     };
+
+    // Normalize a USDA food item into the same shape FoodCard expects
+    function normalizeUSDA(food) {
+      const get = id => food.foodNutrients?.find(n => n.nutrientId === id)?.value || 0;
+      return {
+        _source: "usda",
+        code: String(food.fdcId),
+        product_name: food.description
+          .split(",").map(s => s.trim())
+          .map((s,i) => i===0 ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : s.toLowerCase())
+          .join(", "),
+        brands: food.brandOwner || food.brandName || "",
+        nutriments: {
+          "energy-kcal_100g": get(1008),
+          proteins_100g:       get(1003),
+          carbohydrates_100g:  get(1005),
+          fat_100g:            get(1004),
+          fiber_100g:          get(1079),
+          sugars_100g:         get(2000),
+          sodium_100g:         get(1093) / 1000,
+        },
+      };
+    }
 
     function MiniBar({label,value,goal,color}) {
       const pct=Math.min(100,(value/goal)*100), over=value>goal;
@@ -156,11 +181,38 @@
         if(!q.trim()) return;
         setLoading(true);setError("");setResults([]);
         try {
-          const r=await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&json=1&page_size=15&fields=product_name,brands,nutriments,code`);
-          const d=await r.json();
-          const f=(d.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]);
-          setResults(f); if(!f.length) setError("No results found.");
-        } catch {setError("Search failed.");}
+          const [usdaRes, offRes] = await Promise.allSettled([
+            fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS),Branded`).then(r=>r.json()),
+            fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&json=1&page_size=10&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
+          ]);
+
+          const usda = usdaRes.status==="fulfilled"
+            ? (usdaRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0)
+            : [];
+
+          const off = offRes.status==="fulfilled"
+            ? (offRes.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0)
+            : [];
+
+          // Interleave: USDA generics first (Foundation/SR/Survey), then branded results merged with OFF
+          const usdaGeneric = usda.filter(p=>!p.brands);
+          const usdaBranded = usda.filter(p=>p.brands);
+
+          // Deduplicate OFF against USDA branded by normalized name similarity
+          const usdaNames = new Set(usdaBranded.map(p=>p.product_name.toLowerCase().slice(0,20)));
+          const offUnique = off.filter(p=>!usdaNames.has((p.product_name||"").toLowerCase().slice(0,20)));
+
+          // Interleave branded: 1 USDA, 1 OFF, 1 USDA, 1 OFF...
+          const branded=[], len=Math.max(usdaBranded.length, offUnique.length);
+          for(let i=0;i<len;i++){
+            if(usdaBranded[i]) branded.push(usdaBranded[i]);
+            if(offUnique[i]) branded.push(offUnique[i]);
+          }
+
+          const merged=[...usdaGeneric,...branded];
+          setResults(merged);
+          if(!merged.length) setError("No results found. Try a different term.");
+        } catch {setError("Search failed. Check your connection.");}
         setLoading(false);
       };
 
@@ -234,7 +286,7 @@
             <div className="flex justify-between items-center mb-2">
               <div>
                 <h1 className="text-lg font-bold text-gray-900">🥗 NutriTrack</h1>
-                <p className="text-xs text-gray-400">{todayStr()}</p>
+                <p className="text-xs text-gray-400">USDA · Open Food Facts</p>
               </div>
               <div className={`text-right ${calLeft<0?"text-red-500":"text-emerald-600"}`}>
                 <p className="text-2xl font-black leading-none">{Math.abs(calLeft)}</p>
