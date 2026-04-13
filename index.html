@@ -181,35 +181,38 @@
         if(!q.trim()) return;
         setLoading(true);setError("");setResults([]);
         try {
-          const [usdaRes, offRes] = await Promise.allSettled([
-            fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?query=${encodeURIComponent(q)}&api_key=${USDA_KEY}&pageSize=15&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29&dataType=Branded`).then(r=>r.json()),
-            fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&json=1&page_size=10&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
+          const enc = encodeURIComponent;
+          const base = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&pageSize=10&query=${enc(q)}`;
+          const [genericRes, brandedRes, offRes] = await Promise.allSettled([
+            fetch(`${base}&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29`).then(r=>r.json()),
+            fetch(`${base}&dataType=Branded`).then(r=>r.json()),
+            fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${enc(q)}&json=1&page_size=8&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
           ]);
 
-          const usda = usdaRes.status==="fulfilled"
-            ? (usdaRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0)
+          const generic = genericRes.status==="fulfilled"
+            ? (genericRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0)
             : [];
-
+          const usdaBranded = brandedRes.status==="fulfilled"
+            ? (brandedRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0)
+            : [];
           const off = offRes.status==="fulfilled"
             ? (offRes.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0)
             : [];
 
-          // Interleave: USDA generics first (Foundation/SR/Survey), then branded results merged with OFF
-          const usdaGeneric = usda.filter(p=>!p.brands);
-          const usdaBranded = usda.filter(p=>p.brands);
+          // Deduplicate branded sources by first 20 chars of name
+          const genericNames = new Set(generic.map(p=>p.product_name.toLowerCase().slice(0,20)));
+          const usdaBrandedUnique = usdaBranded.filter(p=>!genericNames.has(p.product_name.toLowerCase().slice(0,20)));
+          const allBrandedNames = new Set(usdaBrandedUnique.map(p=>p.product_name.toLowerCase().slice(0,20)));
+          const offUnique = off.filter(p=>!allBrandedNames.has((p.product_name||"").toLowerCase().slice(0,20)));
 
-          // Deduplicate OFF against USDA branded by normalized name similarity
-          const usdaNames = new Set(usdaBranded.map(p=>p.product_name.toLowerCase().slice(0,20)));
-          const offUnique = off.filter(p=>!usdaNames.has((p.product_name||"").toLowerCase().slice(0,20)));
-
-          // Interleave branded: 1 USDA, 1 OFF, 1 USDA, 1 OFF...
-          const branded=[], len=Math.max(usdaBranded.length, offUnique.length);
+          // Interleave branded results
+          const branded=[], len=Math.max(usdaBrandedUnique.length, offUnique.length);
           for(let i=0;i<len;i++){
-            if(usdaBranded[i]) branded.push(usdaBranded[i]);
+            if(usdaBrandedUnique[i]) branded.push(usdaBrandedUnique[i]);
             if(offUnique[i]) branded.push(offUnique[i]);
           }
 
-          const merged=[...usdaGeneric,...branded];
+          const merged=[...generic, ...branded];
           setResults(merged);
           if(!merged.length) setError("No results found. Try a different term.");
         } catch {setError("Search failed. Check your connection.");}
