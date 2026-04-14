@@ -4,8 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>NutriTrack</title>
-
-  <!-- PWA -->
   <link rel="icon" type="image/x-icon" href="./favicon.ico">
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#10b981" />
@@ -14,14 +12,12 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="NutriTrack" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin></script>
   <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js"></script>
-
   <style>
     * { -webkit-tap-highlight-color: transparent; }
     body { margin: 0; overscroll-behavior: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -29,12 +25,410 @@
   </style>
 </head>
 <body class="bg-gray-50">
-  <div id="root"></div>
+<div id="root"></div>
 
-  <div id="install-banner" class="fixed bottom-0 left-0 right-0 bg-emerald-500 text-white p-3 flex items-center justify-between z-50 shadow-xl safe-bottom">
+<div id="install-banner" class="fixed bottom-0 left-0 right-0 bg-emerald-500 text-white p-3 flex items-center justify-between z-50 shadow-xl">
+  <div>
+    <p class="font-bold text-sm">📲 Install NutriTrack</p>
+    <p class="text-xs opacity-75">Add to home screen for offline access</p>
+  </div>
+  <div class="flex gap-2 items-center">
+    <button id="install-btn" class="bg-white text-emerald-600 font-bold text-sm px-3 py-1.5 rounded-lg">Install</button>
+    <button id="dismiss-btn" class="text-white opacity-60 text-xl px-1">✕</button>
+  </div>
+</div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+const { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine } = Recharts;
+
+const DEF_GOALS = { calories:2000, protein:50, carbs:275, fat:78, fiber:28, sugar:50, sodium:2300 };
+const MEALS = ["Breakfast","Lunch","Dinner","Snack"];
+const MI = { Breakfast:"🌅", Lunch:"☀️", Dinner:"🌙", Snack:"🍎" };
+const MC = ["#60a5fa","#fbbf24","#f87171"];
+const OZ_TO_G = 28.3495;
+
+const toG = (val, unit) => unit === "oz" ? val * OZ_TO_G : val;
+const toDisplay = (grams, unit) => unit === "oz" ? +(grams / OZ_TO_G).toFixed(2) : Math.round(grams);
+
+const todayStr = () => new Date().toISOString().slice(0,10);
+const last7 = () => Array.from({length:7},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-(6-i)); return d.toISOString().slice(0,10); });
+const sumLog = es => es.reduce((a,e)=>({
+  calories:a.calories+(e.calories||0), protein:a.protein+(e.protein||0),
+  carbs:a.carbs+(e.carbs||0), fat:a.fat+(e.fat||0),
+  fiber:a.fiber+(e.fiber||0), sodium:a.sodium+(e.sodium||0), sugar:a.sugar+(e.sugar||0),
+}), {calories:0,protein:0,carbs:0,fat:0,fiber:0,sodium:0,sugar:0});
+
+const calcNutrients = (per100g, grams) => ({
+  calories: Math.round((per100g.calories||0) * grams / 100),
+  protein:  +((per100g.protein||0)  * grams / 100).toFixed(1),
+  carbs:    +((per100g.carbs||0)    * grams / 100).toFixed(1),
+  fat:      +((per100g.fat||0)      * grams / 100).toFixed(1),
+  fiber:    +((per100g.fiber||0)    * grams / 100).toFixed(1),
+  sodium:   Math.round((per100g.sodium||0) * grams / 100),
+  sugar:    +((per100g.sugar||0)    * grams / 100).toFixed(1),
+});
+
+const USDA_KEY = "REPLACE_ME_WITH_REAL_KEY";
+
+const store = {
+  get: k => { try { const v=localStorage.getItem(k); return v?JSON.parse(v):null; } catch { return null; } },
+  set: (k,v) => { try { localStorage.setItem(k,JSON.stringify(v)); } catch {} },
+};
+
+function normalizeUSDA(food) {
+  const get = id => food.foodNutrients?.find(n=>n.nutrientId===id)?.value || 0;
+  // Normalize suggested serving size to grams
+  let suggestedG = null;
+  if (food.servingSize && food.servingSizeUnit) {
+    const u = food.servingSizeUnit.toLowerCase();
+    if (u === "g" || u === "grm" || u === "gram") suggestedG = food.servingSize;
+    else if (u === "oz" || u === "ounce") suggestedG = food.servingSize * OZ_TO_G;
+    // ignore cups/tbsp etc — no reliable conversion without density
+  }
+  return {
+    _source: "usda",
+    code: String(food.fdcId),
+    product_name: food.description
+      .split(",").map(s=>s.trim())
+      .map((s,i)=>i===0 ? s.charAt(0).toUpperCase()+s.slice(1).toLowerCase() : s.toLowerCase())
+      .join(", "),
+    brands: food.brandOwner || food.brandName || "",
+    suggestedG,
+    suggestedLabel: food.servingSize && food.servingSizeUnit ? `${food.servingSize}${food.servingSizeUnit}` : null,
+    nutriments: {
+      "energy-kcal_100g": get(1008),
+      proteins_100g:       get(1003),
+      carbohydrates_100g:  get(1005),
+      fat_100g:            get(1004),
+      fiber_100g:          get(1079),
+      sugars_100g:         get(2000),
+      sodium_100g:         get(1093) / 1000,
+    },
+  };
+}
+
+function UnitToggle({ unit, onChange }) {
+  return (
+    <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs font-semibold shrink-0">
+      {["g","oz"].map(u=>(
+        <button key={u} onClick={()=>onChange(u)}
+          className={`px-2.5 py-1.5 transition-colors ${unit===u?"bg-emerald-500 text-white":"bg-white text-gray-400 hover:bg-gray-50"}`}>
+          {u}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function QtyInput({ value, onChange, unit, onUnitChange }) {
+  // value is a display string; parent controls it
+  return (
+    <div className="flex flex-1 border border-gray-200 rounded-lg overflow-hidden">
+      <input type="number" min="0" step="any" value={value}
+        onChange={e => onChange(e.target.value)}
+        onBlur={e => { const n = parseFloat(e.target.value); onChange(isNaN(n)||n<=0 ? "1" : String(n)); }}
+        className="flex-1 px-2 py-1.5 text-sm outline-none min-w-0"/>
+      <div className="flex border-l border-gray-200">
+        {["g","oz"].map(u=>(
+          <button key={u} onClick={()=>onUnitChange(u)}
+            className={`px-2 text-xs font-semibold transition-colors ${unit===u?"bg-emerald-500 text-white":"bg-gray-50 text-gray-400 hover:bg-gray-100"}`}>
+            {u}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FoodCard({item, meal, onAdd}) {
+  const n = item.nutriments||{};
+  const per100g = {
+    calories: n["energy-kcal_100g"]||0, protein: n.proteins_100g||0,
+    carbs: n.carbohydrates_100g||0, fat: n.fat_100g||0,
+    fiber: n.fiber_100g||0, sodium: (n.sodium_100g||0)*1000, sugar: n.sugars_100g||0,
+  };
+
+  const initQty = item.suggestedG ? String(Math.round(item.suggestedG)) : "100";
+  const [qtyStr, setQtyStr] = useState(initQty);
+  const [unit, setUnit] = useState("g");
+
+  const handleUnitChange = (u) => {
+    const cur = parseFloat(qtyStr)||1;
+    const grams = toG(cur, unit);
+    setQtyStr(String(toDisplay(grams, u)));
+    setUnit(u);
+  };
+
+  const grams = toG(parseFloat(qtyStr)||1, unit);
+  const nutr = calcNutrients(per100g, grams);
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+      <div className="flex justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <p className="font-semibold text-sm text-gray-800 truncate">{item.product_name}</p>
+          <p className="text-xs text-gray-400 truncate">{item.brands||""}</p>
+        </div>
+        <span className="text-xs bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-full h-fit whitespace-nowrap shrink-0">{nutr.calories} kcal</span>
+      </div>
+      <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mb-2">
+        <span>P <b className="text-blue-500">{nutr.protein}g</b></span>
+        <span>C <b className="text-yellow-500">{nutr.carbs}g</b></span>
+        <span>F <b className="text-red-400">{nutr.fat}g</b></span>
+        <span>Fi <b className="text-green-500">{nutr.fiber}g</b></span>
+        <span>Su <b className="text-pink-400">{nutr.sugar}g</b></span>
+        <span>Na <b className="text-purple-400">{nutr.sodium}mg</b></span>
+      </div>
+      {item.suggestedG && (
+        <button onClick={()=>{ setUnit("g"); setQtyStr(String(Math.round(item.suggestedG))); }}
+          className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mb-2 hover:bg-emerald-100 transition-colors">
+          📏 Suggested serving: {item.suggestedLabel}
+        </button>
+      )}
+      <div className="flex gap-2">
+        <QtyInput value={qtyStr} onChange={setQtyStr} unit={unit} onUnitChange={handleUnitChange}/>
+        <button onClick={()=>onAdd(item, grams, per100g)}
+          className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap">
+          + {MI[meal]}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditModal({ entry, onSave, onClose }) {
+  const [qtyStr, setQtyStr] = useState(String(entry.qty));
+  const [unit, setUnit] = useState("g");
+  const [meal, setMeal] = useState(entry.meal);
+
+  const handleUnitChange = (u) => {
+    const cur = parseFloat(qtyStr)||1;
+    const grams = toG(cur, unit);
+    setQtyStr(String(toDisplay(grams, u)));
+    setUnit(u);
+  };
+
+  const grams = toG(parseFloat(qtyStr)||1, unit);
+  const nutr = calcNutrients(entry.per100g, grams);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)"}}>
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+        <div className="flex justify-between items-center px-4 py-3 border-b border-gray-100">
+          <p className="font-bold text-gray-800 text-sm">✏️ Edit Entry</p>
+          <button onClick={onClose} className="text-gray-400 text-xl font-bold">✕</button>
+        </div>
+        <div className="p-4">
+          <p className="font-semibold text-sm text-gray-800 mb-1 truncate">{entry.name}</p>
+          <p className="text-xs text-gray-400 mb-3">{nutr.calories} kcal · P{nutr.protein} C{nutr.carbs} F{nutr.fat}g</p>
+
+          <p className="text-xs font-semibold text-gray-500 mb-1">Serving size</p>
+          <div className="mb-3">
+            <QtyInput value={qtyStr} onChange={setQtyStr} unit={unit} onUnitChange={handleUnitChange}/>
+          </div>
+
+          <p className="text-xs font-semibold text-gray-500 mb-1">Meal</p>
+          <div className="flex gap-1.5 mb-4 flex-wrap">
+            {MEALS.map(m=>(
+              <button key={m} onClick={()=>setMeal(m)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${meal===m?"bg-emerald-500 text-white":"bg-gray-100 text-gray-500"}`}>
+                {MI[m]} {m}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={()=>onSave({...entry, qty:Math.round(grams), meal, ...nutr})}
+            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-sm transition-colors">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniBar({label,value,goal,color}) {
+  const pct=Math.min(100,(value/goal)*100), over=value>goal;
+  return (
     <div>
-      <p class="font-bold text-sm">📲 Install NutriTrack</p>
-      <p class="text-xs opacity-75">Add to home screen for offline access</p>
+      <div className="flex justify-between text-xs mb-0.5">
+        <span className="text-gray-600">{label}</span>
+        <span className={over?"text-red-500 font-bold":"text-gray-400"}>{Math.round(value)}/{goal}</span>
+      </div>
+      <div className="h-1.5 bg-gray-100 rounded-full">
+        <div className={`h-full rounded-full transition-all ${over?"bg-red-400":color}`} style={{width:`${pct}%`}}/>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [tab,setTab]=useState("search");
+  const [query,setQuery]=useState("");
+  const [results,setResults]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+  const [meal,setMeal]=useState("Breakfast");
+  const [log,setLog]=useState([]);
+  const [history,setHistory]=useState({});
+  const [goals,setGoals]=useState(DEF_GOALS);
+  const [goalDraft,setGoalDraft]=useState(DEF_GOALS);
+  const [showScanner,setShowScanner]=useState(false);
+  const [scanMode,setScanMode]=useState("camera");
+  const [barcodeInput,setBarcodeInput]=useState("");
+  const [toast,setToast]=useState("");
+  const [offline,setOffline]=useState(!navigator.onLine);
+  const [editEntry,setEditEntry]=useState(null);
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+
+  useEffect(()=>{
+    const g=store.get("ntr-goals"); if(g){setGoals(g);setGoalDraft(g);}
+    const l=store.get(`ntr-log-${todayStr()}`); if(l) setLog(l);
+    const on=()=>setOffline(false), off=()=>setOffline(true);
+    window.addEventListener("online",on); window.addEventListener("offline",off);
+    return ()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
+  },[]);
+
+  useEffect(()=>{
+    if(tab!=="history") return;
+    const h={};
+    for(const d of last7()) h[d]=store.get(`ntr-log-${d}`)||[];
+    h[todayStr()]=log; setHistory(h);
+  },[tab,log]);
+
+  const saveLog=nl=>{setLog(nl);store.set(`ntr-log-${todayStr()}`,nl);};
+  const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
+
+  const doSearch=async q=>{
+    if(!q.trim()) return;
+    setLoading(true);setError("");setResults([]);
+    try {
+      const enc=encodeURIComponent;
+      const base=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&pageSize=10&query=${enc(q)}`;
+      const [genericRes,brandedRes,offRes]=await Promise.allSettled([
+        fetch(`${base}&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29`).then(r=>r.json()),
+        fetch(`${base}&dataType=Branded`).then(r=>r.json()),
+        fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${enc(q)}&json=1&page_size=8&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
+      ]);
+      const generic=genericRes.status==="fulfilled"?(genericRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
+      const usdaBranded=brandedRes.status==="fulfilled"?(brandedRes.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
+      const off=offRes.status==="fulfilled"?(offRes.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0):[];
+      const genericNames=new Set(generic.map(p=>p.product_name.toLowerCase().slice(0,20)));
+      const usdaBrandedUnique=usdaBranded.filter(p=>!genericNames.has(p.product_name.toLowerCase().slice(0,20)));
+      const allBrandedNames=new Set(usdaBrandedUnique.map(p=>p.product_name.toLowerCase().slice(0,20)));
+      const offUnique=off.filter(p=>!allBrandedNames.has((p.product_name||"").toLowerCase().slice(0,20)));
+      const branded=[],len=Math.max(usdaBrandedUnique.length,offUnique.length);
+      for(let i=0;i<len;i++){if(usdaBrandedUnique[i])branded.push(usdaBrandedUnique[i]);if(offUnique[i])branded.push(offUnique[i]);}
+      const merged=[...generic,...branded];
+      setResults(merged);
+      if(!merged.length) setError("No results found. Try a different term.");
+    } catch {setError("Search failed. Check your connection.");}
+    setLoading(false);
+  };
+
+  const lookupBarcode=async code=>{
+    setLoading(true);
+    try {
+      const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+      const d=await r.json();
+      if(d.status===1&&d.product?.nutriments?.["energy-kcal_100g"]){
+        setResults([d.product]);setTab("search");setShowScanner(false);
+        showToast(`Found: ${d.product.product_name}`);
+      } else setError("Product not found.");
+    } catch {setError("Lookup failed.");}
+    setLoading(false);setShowScanner(false);
+  };
+
+  useEffect(()=>{
+    if(!showScanner||scanMode!=="camera") return;
+    let stream,interval;
+    (async()=>{
+      if(!("BarcodeDetector" in window)){setScanMode("manual");return;}
+      try {
+        stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+        streamRef.current=stream;
+        if(videoRef.current) videoRef.current.srcObject=stream;
+        const det=new window.BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e"]});
+        interval=setInterval(async()=>{
+          if(!videoRef.current)return;
+          try{const c=await det.detect(videoRef.current);if(c.length>0){clearInterval(interval);stream.getTracks().forEach(t=>t.stop());lookupBarcode(c[0].rawValue);}}catch{}
+        },600);
+      } catch {setScanMode("manual");}
+    })();
+    return ()=>{clearInterval(interval);stream?.getTracks().forEach(t=>t.stop());};
+  },[showScanner,scanMode]);
+
+  const videoCallback=useCallback(node=>{
+    videoRef.current=node;if(node&&streamRef.current)node.srcObject=streamRef.current;
+  },[]);
+
+  const addFood=(item, grams, per100g)=>{
+    const nutr=calcNutrients(per100g, grams);
+    const e={
+      id:Date.now(), name:item.product_name, brand:item.brands||"", meal, qty:Math.round(grams),
+      per100g,
+      ...nutr,
+      time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+    };
+    saveLog([...log,e]);
+    showToast(`${MI[meal]} ${e.name} — ${e.calories} kcal`);
+    setTab("today");
+  };
+
+  const saveEdit=(updated)=>{
+    saveLog(log.map(e=>e.id===updated.id?updated:e));
+    setEditEntry(null);
+    showToast("Entry updated ✓");
+  };
+
+  const totals=sumLog(log), calLeft=goals.calories-totals.calories;
+  const macroData=[
+    {name:"Protein",value:Math.round(totals.protein*4),grams:totals.protein},
+    {name:"Carbs",value:Math.round(totals.carbs*4),grams:totals.carbs},
+    {name:"Fat",value:Math.round(totals.fat*9),grams:totals.fat},
+  ].filter(d=>d.value>0);
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col max-w-lg mx-auto">
+      {offline&&<div className="bg-yellow-400 text-yellow-900 text-xs text-center py-1.5 font-semibold">📵 Offline — search unavailable</div>}
+
+      <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-3 sticky top-0 z-20 shadow-sm">
+        <div className="flex justify-between items-center mb-2">
+          <div>
+            <h1 className="text-lg font-bold text-gray-900">🥗 NutriTrack</h1>
+            <p className="text-xs text-gray-400">USDA · Open Food Facts</p>
+          </div>
+          <div className={`text-right ${calLeft<0?"text-red-500":"text-emerald-600"}`}>
+            <p className="text-2xl font-black leading-none">{Math.abs(calLeft)}</p>
+            <p className="text-xs">{calLeft<0?"kcal over":"kcal left"}</p>
+          </div>
+        </div>
+        <MiniBar label="Calories" value={totals.calories} goal={goals.calories} color="bg-orange-400"/>
+        <div className="grid grid-cols-3 gap-2 mt-1.5">
+          <MiniBar label="Protein" value={totals.protein} goal={goals.protein} color="bg-blue-400"/>
+          <MiniBar label="Carbs" value={totals.carbs} goal={goals.carbs} color="bg-yellow-400"/>
+          <MiniBar label="Fat" value={totals.fat} goal={goals.fat} color="bg-red-400"/>
+        </div>
+      </div>
+
+      <div className="flex bg-white border-b border-gray-200 sticky top-28 z-10">
+        {[["search","🔍 Search"],["today","📋 Today"],["history","📊 History"],["settings","⚙️ Goals"]].map(([t,l])=>(
+          <button key={t} onClick={()=>setTab(t)}
+            className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${tab===t?"border-b-2 border-emerald-500 text-emerald-600":"text-gray-400"}`}>
+            {l}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 overflow-y-auto pb-20">
+
+        {tab==="search"&&(
+          <div className="p-4">
+            <div className="flex gap-1.5 mb-3 overflow-x-auto pb-1">
+              {MEALS.map(m=>(
+                <button key={m} onClick={()      <p class="text-xs opacity-75">Add to home screen for offline access</p>
     </div>
     <div class="flex gap-2 items-center">
       <button id="install-btn" class="bg-white text-emerald-600 font-bold text-sm px-3 py-1.5 rounded-lg">Install</button>
