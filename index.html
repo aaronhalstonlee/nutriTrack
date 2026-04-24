@@ -217,11 +217,14 @@ function App(){
   const [toast,setToast]=useState("");
   const [offline,setOffline]=useState(!navigator.onLine);
   const [editEntry,setEditEntry]=useState(null);
+  const [profile,setProfile]=useState({weight:0,height:0,age:0,gender:"",goalWeight:0});
+  const [profileDraft,setProfileDraft]=useState({weight:0,height:0,age:0,gender:"",goalWeight:0});
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
   useEffect(()=>{
     const g=store.get("ntr-goals");if(g){setGoals(g);setGoalDraft(g);}
+    const p=store.get("ntr-profile");if(p){setProfile(p);setProfileDraft(p);}
     const l=store.get(`ntr-log-${todayStr()}`);if(l)setLog(l);
     const on=()=>setOffline(false),off=()=>setOffline(true);
     window.addEventListener("online",on);window.addEventListener("offline",off);
@@ -237,6 +240,28 @@ function App(){
 
   const saveLog=nl=>{setLog(nl);store.set(`ntr-log-${todayStr()}`,nl);};
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
+
+  const calcBMI=()=>{
+    if(!profile.weight||!profile.height)return null;
+    return (profile.weight/(profile.height*profile.height)*703).toFixed(1);
+  };
+
+  const calcBMR=()=>{
+    if(!profile.weight||!profile.height||!profile.age||!profile.gender)return null;
+    const kg=profile.weight/2.20462;
+    const cm=profile.height*2.54;
+    if(profile.gender==="male")return Math.round(10*kg+6.25*cm-5*profile.age+5);
+    return Math.round(10*kg+6.25*cm-5*profile.age-161);
+  };
+
+  const calcWeightLoss=()=>{
+    if(!profile.weight||!profile.goalWeight||!profile.goalWeight)return null;
+    if(profile.goalWeight>=profile.weight)return null;
+    const totalLoss=profile.weight-profile.goalWeight;
+    const weeksNeeded=Math.ceil(totalLoss/2);
+    const dailyDeficit=Math.round((totalLoss*3500)/(weeksNeeded*7));
+    return {totalLoss:totalLoss.toFixed(1),weeksNeeded,dailyDeficit,projectedDate:new Date(Date.now()+weeksNeeded*7*24*3600*1000).toLocaleDateString()};
+  };
 
   const doSearch=async q=>{
     if(!q.trim())return;
@@ -538,8 +563,101 @@ function App(){
 
         {tab==="settings"&&(
           <div className="p-4">
-            <p className="font-semibold text-sm text-gray-700 mb-1">Daily Goals</p>
-            <p className="text-xs text-gray-400 mb-4">Set your personal targets</p>
+            <div className="mb-6">
+              <p className="font-semibold text-sm text-gray-700 mb-3">📊 Profile & Health Metrics</p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Weight (lbs)</p>
+                  <input type="number" min="0" step="0.1" value={profileDraft.weight||""}
+                    onChange={e=>setProfileDraft(p=>({...p,weight:Number(e.target.value)}))}
+                    className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Height (inches)</p>
+                  <input type="number" min="0" step="0.1" value={profileDraft.height||""}
+                    onChange={e=>setProfileDraft(p=>({...p,height:Number(e.target.value)}))}
+                    className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Age</p>
+                  <input type="number" min="0" value={profileDraft.age||""}
+                    onChange={e=>setProfileDraft(p=>({...p,age:Number(e.target.value)}))}
+                    className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Gender</p>
+                  <select value={profileDraft.gender||""} onChange={e=>setProfileDraft(p=>({...p,gender:e.target.value}))}
+                    className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800">
+                    <option value="">Select...</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+              </div>
+
+              {profile.weight&&profile.height&&profile.age&&profile.gender&&(
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-3 text-center border border-blue-200">
+                    <p className="text-xs text-blue-600 font-semibold">BMI</p>
+                    <p className="text-xl font-bold text-blue-700">{calcBMI()}</p>
+                    <p className="text-xs text-blue-600 mt-1">
+                      {calcBMI()<18.5?"Underweight":calcBMI()<25?"Normal":calcBMI()<30?"Overweight":"Obese"}
+                    </p>
+                  </div>
+                  <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-3 text-center border border-orange-200">
+                    <p className="text-xs text-orange-600 font-semibold">BMR</p>
+                    <p className="text-xl font-bold text-orange-700">{calcBMR()}</p>
+                    <p className="text-xs text-orange-600 mt-1">kcal/day</p>
+                  </div>
+                  <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl p-3 text-center border border-emerald-200">
+                    <p className="text-xs text-emerald-600 font-semibold">Current</p>
+                    <p className="text-xl font-bold text-emerald-700">{profile.weight}</p>
+                    <p className="text-xs text-emerald-600 mt-1">lbs</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm mb-4">
+                <p className="text-sm font-medium text-gray-700 mb-1">Goal Weight (lbs)</p>
+                <input type="number" min="0" step="0.1" value={profileDraft.goalWeight||""}
+                  onChange={e=>setProfileDraft(p=>({...p,goalWeight:Number(e.target.value)}))}
+                  placeholder="Enter your target weight"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"/>
+              </div>
+
+              {profile.goalWeight&&profile.weight&&profile.goalWeight<profile.weight&&(
+                <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-4 border border-emerald-200 mb-4">
+                  <p className="font-semibold text-sm text-emerald-800 mb-3">🎯 Weight Loss Projection</p>
+                  {calcWeightLoss()&&(
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-700">Total Loss</span>
+                        <span className="font-bold text-emerald-600">{calcWeightLoss().totalLoss} lbs</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-700">At 2 lbs/week</span>
+                        <span className="font-bold text-emerald-600">{calcWeightLoss().weeksNeeded} weeks</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-700">Daily deficit needed</span>
+                        <span className="font-bold text-emerald-600">{calcWeightLoss().dailyDeficit} kcal</span>
+                      </div>
+                      <div className="flex justify-between text-sm pt-2 border-t border-emerald-200">
+                        <span className="text-gray-700">Projected date</span>
+                        <span className="font-bold text-emerald-700">{calcWeightLoss().projectedDate}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);showToast("Profile saved! ✓");}}
+                className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-bold text-sm mb-2">
+                Save Profile
+              </button>
+            </div>
+
+            <p className="font-semibold text-sm text-gray-700 mb-3">🎯 Daily Goals</p>
             {[{key:"calories",label:"🔥 Calories",unit:"kcal"},{key:"protein",label:"💪 Protein",unit:"g"},
               {key:"carbs",label:"🌾 Carbs",unit:"g"},{key:"fat",label:"🥑 Fat",unit:"g"},
               {key:"fiber",label:"🥦 Fiber",unit:"g"},{key:"sugar",label:"🍬 Sugar (max)",unit:"g"},
