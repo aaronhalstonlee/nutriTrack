@@ -406,7 +406,6 @@ function App(){
     const e={id:Date.now(),name:item.product_name,brand:item.brands||"",meal,qty:Math.round(grams),per100g,...nutr,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})};
     saveLog([...log,e]);
     showToast(`${MI[meal]} ${e.name} — ${e.calories} kcal`);
-    setTab("today");
   };
 
   const saveEdit=updated=>{saveLog(log.map(e=>e.id===updated.id?updated:e));setEditEntry(null);showToast("Entry updated ✓");};
