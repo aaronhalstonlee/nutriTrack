@@ -43,6 +43,8 @@ const MEALS=["Breakfast","Lunch","Dinner","Snack"];
 const MI={Breakfast:"🌅",Lunch:"☀️",Dinner:"🌙",Snack:"🍎"};
 const MC=["#60a5fa","#fbbf24","#f87171"];
 const OZ=28.3495;
+const ACTIVITY_LEVELS={sedentary:1.2,lightly:1.375,moderate:1.55,very:1.725,extra:1.9};
+const ACTIVITY_LABELS={sedentary:"Sedentary (little/no exercise)",lightly:"Lightly active (1-3 days/week)",moderate:"Moderately active (3-5 days/week)",very:"Very active (6-7 days/week)",extra:"Extra active (physical job/sports)"};
 const toG=(v,u)=>u==="oz"?v*OZ:v;
 const toD=(g,u)=>u==="oz"?+(g/OZ).toFixed(2):Math.round(g);
 const todayStr=()=>new Date().toISOString().slice(0,10);
@@ -217,8 +219,8 @@ function App(){
   const [toast,setToast]=useState("");
   const [offline,setOffline]=useState(!navigator.onLine);
   const [editEntry,setEditEntry]=useState(null);
-  const [profile,setProfile]=useState({weight:0,height:0,age:0,gender:"",goalWeight:0});
-  const [profileDraft,setProfileDraft]=useState({weight:0,height:0,age:0,gender:"",goalWeight:0});
+  const [profile,setProfile]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2});
+  const [profileDraft,setProfileDraft]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2});
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
@@ -241,24 +243,43 @@ function App(){
   const saveLog=nl=>{setLog(nl);store.set(`ntr-log-${todayStr()}`,nl);};
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
 
+  const getTotalHeight=p=>p.heightFeet*12+(p.heightInches||0);
+
   const calcBMI=()=>{
-    if(!profile.weight||!profile.height)return null;
-    return (profile.weight/(profile.height*profile.height)*703).toFixed(1);
+    const h=getTotalHeight(profile);
+    if(!profile.weight||!h)return null;
+    return (profile.weight/(h*h)*703).toFixed(1);
   };
 
   const calcBMR=()=>{
-    if(!profile.weight||!profile.height||!profile.age||!profile.gender)return null;
+    const h=getTotalHeight(profile);
+    if(!profile.weight||!h||!profile.age||!profile.gender)return null;
     const kg=profile.weight/2.20462;
-    const cm=profile.height*2.54;
+    const cm=h*2.54;
     if(profile.gender==="male")return Math.round(10*kg+6.25*cm-5*profile.age+5);
     return Math.round(10*kg+6.25*cm-5*profile.age-161);
+  };
+
+  const calcTDEE=()=>{
+    const bmr=calcBMR();
+    if(!bmr)return null;
+    const factor=ACTIVITY_LEVELS[profile.activityLevel]||1.55;
+    return Math.round(bmr*factor);
+  };
+
+  const calcAutoGoals=()=>{
+    const tdee=calcTDEE();
+    if(!tdee)return null;
+    const deficit=profile.weeklyWeightLoss*3500/7;
+    const targetCals=Math.max(tdee-deficit,1200);
+    return{calories:Math.round(targetCals),protein:Math.round(targetCals*0.3/4),carbs:Math.round(targetCals*0.4/4),fat:Math.round(targetCals*0.3/9),fiber:28,sugar:50,sodium:2300};
   };
 
   const calcWeightLoss=()=>{
     if(!profile.weight||!profile.goalWeight||!profile.goalWeight)return null;
     if(profile.goalWeight>=profile.weight)return null;
     const totalLoss=profile.weight-profile.goalWeight;
-    const weeksNeeded=Math.ceil(totalLoss/2);
+    const weeksNeeded=Math.ceil(totalLoss/profile.weeklyWeightLoss);
     const dailyDeficit=Math.round((totalLoss*3500)/(weeksNeeded*7));
     return {totalLoss:totalLoss.toFixed(1),weeksNeeded,dailyDeficit,projectedDate:new Date(Date.now()+weeksNeeded*7*24*3600*1000).toLocaleDateString()};
   };
@@ -573,9 +594,15 @@ function App(){
                     className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
-                  <p className="text-xs text-gray-500 mb-1">Height (inches)</p>
-                  <input type="number" min="0" step="0.1" value={profileDraft.height||""}
-                    onChange={e=>setProfileDraft(p=>({...p,height:Number(e.target.value)}))}
+                  <p className="text-xs text-gray-500 mb-1">Height (ft)</p>
+                  <input type="number" min="0" step="1" value={profileDraft.heightFeet||""}
+                    onChange={e=>setProfileDraft(p=>({...p,heightFeet:Number(e.target.value)}))}
+                    className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Height (in)</p>
+                  <input type="number" min="0" max="11" step="1" value={profileDraft.heightInches||""}
+                    onChange={e=>setProfileDraft(p=>({...p,heightInches:Number(e.target.value)}))}
                     className="w-full border-0 text-sm font-semibold outline-none bg-transparent text-gray-800"/>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-100 px-3 py-2 shadow-sm">
@@ -595,7 +622,7 @@ function App(){
                 </div>
               </div>
 
-              {profile.weight&&profile.height&&profile.age&&profile.gender&&(
+              {profile.weight&&profile.heightFeet&&profile.age&&profile.gender&&(
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-3 text-center border border-blue-200">
                     <p className="text-xs text-blue-600 font-semibold">BMI</p>
@@ -605,8 +632,8 @@ function App(){
                     </p>
                   </div>
                   <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl p-3 text-center border border-orange-200">
-                    <p className="text-xs text-orange-600 font-semibold">BMR</p>
-                    <p className="text-xl font-bold text-orange-700">{calcBMR()}</p>
+                    <p className="text-xs text-orange-600 font-semibold">TDEE</p>
+                    <p className="text-xl font-bold text-orange-700">{calcTDEE()}</p>
                     <p className="text-xs text-orange-600 mt-1">kcal/day</p>
                   </div>
                   <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl p-3 text-center border border-emerald-200">
@@ -623,6 +650,28 @@ function App(){
                   onChange={e=>setProfileDraft(p=>({...p,goalWeight:Number(e.target.value)}))}
                   placeholder="Enter your target weight"
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"/>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm mb-4">
+                <p className="text-sm font-medium text-gray-700 mb-2">Activity Level</p>
+                <select value={profileDraft.activityLevel||"moderate"} onChange={e=>setProfileDraft(p=>({...p,activityLevel:e.target.value}))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400">
+                  {Object.entries(ACTIVITY_LABELS).map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                </select>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm mb-4">
+                <div className="flex justify-between items-center mb-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Weekly Weight Loss Rate</p>
+                    <p className="text-xs text-gray-500">Max recommended: 2 lbs/week</p>
+                  </div>
+                  <span className="text-lg font-bold text-emerald-600">{profileDraft.weeklyWeightLoss}</span>
+                </div>
+                <input type="number" min="0.5" max="2" step="0.5" value={profileDraft.weeklyWeightLoss||""}
+                  onChange={e=>{const v=Math.min(2,Math.max(0.5,Number(e.target.value)));setProfileDraft(p=>({...p,weeklyWeightLoss:v}));}}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"/>
+                {profileDraft.weeklyWeightLoss>2&&<p className="text-xs text-red-500 mt-2">⚠️ Losing more than 2 lbs/week can be unsafe. Maximum set to 2 lbs/week.</p>}
               </div>
 
               {profile.goalWeight&&profile.weight&&profile.goalWeight<profile.weight&&(
@@ -651,9 +700,13 @@ function App(){
                 </div>
               )}
 
-              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);showToast("Profile saved! ✓");}}
+              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);const autoG=calcAutoGoals();if(autoG){setGoals(autoG);setGoalDraft(autoG);store.set("ntr-goals",autoG);}showToast("Profile & goals saved! ✓");}}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-bold text-sm mb-2">
-                Save Profile
+                Save Profile & Auto-Calculate Goals
+              </button>
+              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);showToast("Profile saved! ✓");}}
+                className="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-xl font-bold text-sm mb-2">
+                Save Profile Only
               </button>
             </div>
 
