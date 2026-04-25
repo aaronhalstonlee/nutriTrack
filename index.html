@@ -219,8 +219,10 @@ function App(){
   const [toast,setToast]=useState("");
   const [offline,setOffline]=useState(!navigator.onLine);
   const [editEntry,setEditEntry]=useState(null);
-  const [profile,setProfile]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2});
-  const [profileDraft,setProfileDraft]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2});
+  const [profile,setProfile]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2,weigh_ins:[]});
+  const [profileDraft,setProfileDraft]=useState({weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:2,weigh_ins:[]});
+  const [weighInDate,setWeighInDate]=useState(todayStr());
+  const [weighInWeight,setWeighInWeight]=useState("");
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
@@ -245,43 +247,95 @@ function App(){
 
   const getTotalHeight=p=>p.heightFeet*12+(p.heightInches||0);
 
-  const calcBMI=()=>{
-    const h=getTotalHeight(profile);
-    if(!profile.weight||!h)return null;
-    return (profile.weight/(h*h)*703).toFixed(1);
+  const calcBMI=(p=profile)=>{
+    const h=getTotalHeight(p);
+    if(!p.weight||!h)return null;
+    return (p.weight/(h*h)*703).toFixed(1);
   };
 
-  const calcBMR=()=>{
-    const h=getTotalHeight(profile);
-    if(!profile.weight||!h||!profile.age||!profile.gender)return null;
-    const kg=profile.weight/2.20462;
+  const calcBMR=(p=profile)=>{
+    const h=getTotalHeight(p);
+    if(!p.weight||!h||!p.age||!p.gender)return null;
+    const kg=p.weight/2.20462;
     const cm=h*2.54;
-    if(profile.gender==="male")return Math.round(10*kg+6.25*cm-5*profile.age+5);
-    return Math.round(10*kg+6.25*cm-5*profile.age-161);
+    if(p.gender==="male")return Math.round(10*kg+6.25*cm-5*p.age+5);
+    return Math.round(10*kg+6.25*cm-5*p.age-161);
   };
 
-  const calcTDEE=()=>{
-    const bmr=calcBMR();
+  const calcTDEE=(p=profile)=>{
+    const bmr=calcBMR(p);
     if(!bmr)return null;
-    const factor=ACTIVITY_LEVELS[profile.activityLevel]||1.55;
+    const factor=ACTIVITY_LEVELS[p.activityLevel]||1.55;
     return Math.round(bmr*factor);
   };
 
-  const calcAutoGoals=()=>{
-    const tdee=calcTDEE();
+  const calcAutoGoals=(p=profile)=>{
+    const tdee=calcTDEE(p);
     if(!tdee)return null;
-    const deficit=profile.weeklyWeightLoss*3500/7;
+    const deficit=p.weeklyWeightLoss*3500/7;
     const targetCals=Math.max(tdee-deficit,1200);
     return{calories:Math.round(targetCals),protein:Math.round(targetCals*0.3/4),carbs:Math.round(targetCals*0.4/4),fat:Math.round(targetCals*0.3/9),fiber:28,sugar:50,sodium:2300};
   };
 
-  const calcWeightLoss=()=>{
-    if(!profile.weight||!profile.goalWeight||!profile.goalWeight)return null;
-    if(profile.goalWeight>=profile.weight)return null;
-    const totalLoss=profile.weight-profile.goalWeight;
-    const weeksNeeded=Math.ceil(totalLoss/profile.weeklyWeightLoss);
+  const calcWeightLoss=(p=profile)=>{
+    if(!p.weight||!p.goalWeight||!p.goalWeight)return null;
+    if(p.goalWeight>=p.weight)return null;
+    const totalLoss=p.weight-p.goalWeight;
+    const weeksNeeded=Math.ceil(totalLoss/p.weeklyWeightLoss);
     const dailyDeficit=Math.round((totalLoss*3500)/(weeksNeeded*7));
     return {totalLoss:totalLoss.toFixed(1),weeksNeeded,dailyDeficit,projectedDate:new Date(Date.now()+weeksNeeded*7*24*3600*1000).toLocaleDateString()};
+  };
+
+  const addWeighIn=(date,weight)=>{
+    if(!weight)return;
+    const updated={...profileDraft,weigh_ins:[...(profileDraft.weigh_ins||[]).filter(w=>w.date!==date),{date,weight:Number(weight)}].sort((a,b)=>new Date(a.date)-new Date(b.date)),weight:Number(weight)};
+    setProfileDraft(updated);
+    setWeighInDate(todayStr());
+    setWeighInWeight("");
+    showToast(`Weigh-in recorded: ${weight} lbs on ${date}`);
+  };
+
+  const getWeighInTrend=()=>{
+    if(!profileDraft.weigh_ins||profileDraft.weigh_ins.length<2)return null;
+    const sorted=[...profileDraft.weigh_ins].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    const latest=sorted[0].weight;
+    const previous=sorted[1].weight;
+    const change=latest-previous;
+    return {change:change.toFixed(1),direction:change<0?"down":"up",icon:change<0?"📉":"📈"};
+  };
+
+  const exportBackup=()=>{
+    const backup={profile,goals};
+    const blob=new Blob([JSON.stringify(backup,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`nutritrack-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("Backup downloaded! ✓");
+  };
+
+  const importBackup=e=>{
+    const file=e.target.files?.[0];
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=evt=>{
+      try{
+        const data=JSON.parse(evt.target.result);
+        if(data.profile&&data.goals){
+          setProfile(data.profile);
+          setProfileDraft(data.profile);
+          setGoals(data.goals);
+          setGoalDraft(data.goals);
+          store.set("ntr-profile",data.profile);
+          store.set("ntr-goals",data.goals);
+          showToast("Backup restored! ✓");
+        }else showToast("Invalid backup file");
+      }catch{showToast("Error reading backup file");}
+    };
+    reader.readAsText(file);
+    e.target.value="";
   };
 
   const doSearch=async q=>{
@@ -674,6 +728,59 @@ function App(){
                 {profileDraft.weeklyWeightLoss>2&&<p className="text-xs text-red-500 mt-2">⚠️ Losing more than 2 lbs/week can be unsafe. Maximum set to 2 lbs/week.</p>}
               </div>
 
+              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm mb-4">
+                <p className="text-sm font-medium text-gray-700 mb-3">📊 Log Weigh-In</p>
+                <div className="flex gap-2 mb-2">
+                  <input type="date" value={weighInDate} onChange={e=>setWeighInDate(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"/>
+                  <input type="number" min="0" step="0.1" placeholder="Weight (lbs)" value={weighInWeight}
+                    onChange={e=>setWeighInWeight(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400"/>
+                  <button onClick={()=>addWeighIn(weighInDate,weighInWeight)} disabled={!weighInWeight}
+                    className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white px-3 py-2 rounded-lg font-bold text-sm">
+                    Log
+                  </button>
+                </div>
+                {profileDraft.weigh_ins&&profileDraft.weigh_ins.length>0&&(
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2 font-semibold">Recent Weigh-Ins</p>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {[...profileDraft.weigh_ins].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6).map((entry,idx)=>{
+                        const next=[...profileDraft.weigh_ins].sort((a,b)=>new Date(b.date)-new Date(a.date))[idx+1];
+                        const change=next?((entry.weight-next.weight).toFixed(1)):null;
+                        const changeIcon=change&&change<0?"📉":change&&change>0?"📈":"➖";
+                        return(
+                          <div key={entry.date} className="flex justify-between items-center text-xs text-gray-600 pb-1 border-b border-gray-100 last:border-0">
+                            <span>{entry.date}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold">{entry.weight} lbs</span>
+                              {change&&<span>{changeIcon} {Math.abs(change)} lbs</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 shadow-sm mb-4">
+                <p className="text-sm font-medium text-gray-700 mb-3">💾 Data Backup & Restore</p>
+                <div className="flex gap-2">
+                  <button onClick={exportBackup}
+                    className="flex-1 bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg font-bold text-sm">
+                    📥 Backup Data
+                  </button>
+                  <label className="flex-1">
+                    <input type="file" accept=".json" onChange={importBackup} style={{display:"none"}}/>
+                    <button className="w-full bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg font-bold text-sm cursor-pointer">
+                      📤 Restore Backup
+                    </button>
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">💡 Download your data as JSON to keep a backup. Restore it anytime if data is cleared.</p>
+              </div>
+
               {profile.goalWeight&&profile.weight&&profile.goalWeight<profile.weight&&(
                 <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-4 border border-emerald-200 mb-4">
                   <p className="font-semibold text-sm text-emerald-800 mb-3">🎯 Weight Loss Projection</p>
@@ -700,7 +807,7 @@ function App(){
                 </div>
               )}
 
-              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);const autoG=calcAutoGoals();if(autoG){setGoals(autoG);setGoalDraft(autoG);store.set("ntr-goals",autoG);}showToast("Profile & goals saved! ✓");}}
+              <button onClick={()=>{setProfile(profileDraft);store.set("ntr-profile",profileDraft);const autoG=calcAutoGoals(profileDraft);if(autoG){setGoals(autoG);setGoalDraft(autoG);store.set("ntr-goals",autoG);}showToast("Profile & goals saved! ✓");}}
                 className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2 rounded-xl font-bold text-sm mb-2">
                 Save Profile & Auto-Calculate Goals
               </button>
