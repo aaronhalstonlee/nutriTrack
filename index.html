@@ -343,7 +343,7 @@ function App(){
     setLoading(true);setError("");setResults([]);
     try{
       const enc=encodeURIComponent;
-      const base=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&pageSize=10&query=${enc(q)}`;
+      const base=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&pageSize=50&query=${enc(q)}`;
       const [gR,bR,oR]=await Promise.allSettled([
         fetch(`${base}&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29`).then(r=>r.json()),
         fetch(`${base}&dataType=Branded`).then(r=>r.json()),
