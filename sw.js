@@ -15,6 +15,22 @@ self.addEventListener("install", e => {
   self.skipWaiting();
 });
 
+self.addEventListener("activate", e => {
+  e.waitUntil(
+    caches.keys().then(names => {
+      return Promise.all(
+        names.map(name => {
+          if (name !== CACHE) {
+            console.log("Deleting old cache:", name);
+            return caches.delete(name);
+          }
+        })
+      );
+    })
+  );
+  self.clients.claim();
+});
+
 self.addEventListener("fetch", e => {
   e.respondWith(
     caches.match(e.request).then(cached => {
