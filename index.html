@@ -179,6 +179,7 @@ function EditModal({entry,onSave,onClose}){
   const [qs,setQs]=useState(String(entry.qty));
   const [unit,setUnit]=useState("g");
   const [meal,setMeal]=useState(entry.meal);
+  const [date,setDate]=useState(entry._date||todayStr());
   const handleUnit=u=>{const g=toG(parseFloat(qs)||1,unit);setQs(String(toD(g,u)));setUnit(u);};
   const grams=toG(parseFloat(qs)||1,unit);
   const per100g=entry.per100g||{};
@@ -193,6 +194,9 @@ function EditModal({entry,onSave,onClose}){
         <div className="p-4">
           <p className="font-semibold text-sm text-gray-800 mb-0.5 truncate">{entry.name}</p>
           <p className="text-xs text-gray-400 mb-3">{nutr.calories} kcal · P{nutr.protein} C{nutr.carbs} F{nutr.fat}g</p>
+          <p className="text-xs font-semibold text-gray-500 mb-1">Date</p>
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400 mb-3"/>
           <p className="text-xs font-semibold text-gray-500 mb-1">Serving size</p>
           <div className="mb-3"><QtyInput value={qs} onChange={setQs} unit={unit} onUnitChange={handleUnit}/></div>
           <p className="text-xs font-semibold text-gray-500 mb-1">Meal</p>
@@ -204,7 +208,7 @@ function EditModal({entry,onSave,onClose}){
               </button>
             ))}
           </div>
-          <button onClick={()=>onSave({...entry,qty:Math.round(grams),meal,...nutr})}
+          <button onClick={()=>onSave({...entry,qty:Math.round(grams),meal,...nutr,_date:date},entry._date||todayStr())}
             className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-sm">
             Save Changes
           </button>
@@ -412,12 +416,30 @@ function App(){
 
   const addFood=(item,grams,per100g)=>{
     const nutr=calc(per100g,grams);
-    const e={id:Date.now(),name:item.product_name,brand:item.brands||"",meal,qty:Math.round(grams),per100g,...nutr,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})};
+    const e={id:Date.now(),name:item.product_name,brand:item.brands||"",meal,qty:Math.round(grams),per100g,_date:todayStr(),...nutr,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})};
     saveLog([...log,e]);
     showToast(`${MI[meal]} ${e.name} — ${e.calories} kcal`);
   };
 
-  const saveEdit=updated=>{saveLog(log.map(e=>e.id===updated.id?updated:e));setEditEntry(null);showToast("Entry updated ✓");};
+  const saveEdit=(updated, originalDate)=>{
+    const newDate=updated._date||todayStr();
+    if(newDate===originalDate){
+      // Same day — just update in place
+      saveLog(log.map(e=>e.id===updated.id?updated:e));
+    } else {
+      // Remove from original day
+      const origLog=(store.get(`ntr-log-${originalDate}`)||[]).filter(e=>e.id!==updated.id);
+      store.set(`ntr-log-${originalDate}`,origLog);
+      if(originalDate===todayStr()) setLog(origLog);
+      // Add to new day
+      const destLog=[...(store.get(`ntr-log-${newDate}`)||[]),updated];
+      store.set(`ntr-log-${newDate}`,destLog);
+      if(newDate===todayStr()) setLog(destLog);
+      else if(originalDate===todayStr()) setLog(origLog);
+    }
+    setEditEntry(null);
+    showToast(newDate===originalDate?"Entry updated ✓":`Moved to ${newDate} ✓`);
+  };
 
   const totals=sumLog(log),calLeft=goals.calories-totals.calories;
   const macroData=[
@@ -864,401 +886,56 @@ function App(){
             {scanMode==="camera"?(
               <div>
                 <div className="relative bg-gray-900">
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
-  <title>NutriTrack</title>
-  <link rel="icon" href="./favicon.ico"/>
-  <link rel="manifest" href="manifest.json"/>
-  <meta name="theme-color" content="#10b981"/>
-  <meta name="mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-  <meta name="apple-mobile-web-app-title" content="NutriTrack"/>
-  <link rel="apple-touch-icon" href="icon-192.png"/>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-is@18.2.0/umd/react-is.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js" crossorigin></script>
-  <script src="https://unpkg.com/recharts@2.8.0/umd/Recharts.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone@7.23.2/babel.min.js"></script>
-  <style>
-    *{-webkit-tap-highlight-color:transparent}
-    body{margin:0;overscroll-behavior:none;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-    #ib{display:none}
-  </style>
-</head>
-<body class="bg-gray-50">
-<div id="root"></div>
-<div id="ib" class="fixed bottom-0 left-0 right-0 bg-emerald-500 text-white p-3 flex items-center justify-between z-50 shadow-xl">
-  <div><p class="font-bold text-sm">📲 Install NutriTrack</p><p class="text-xs opacity-75">Add to home screen for offline access</p></div>
-  <div class="flex gap-2 items-center">
-    <button id="ibtn" class="bg-white text-emerald-600 font-bold text-sm px-3 py-1.5 rounded-lg">Install</button>
-    <button id="dbtn" class="text-white opacity-60 text-xl px-1">✕</button>
-  </div>
-</div>
-<script type="text/babel">
-const {useState,useEffect,useRef,useCallback}=React;
-const {PieChart,Pie,Cell,Tooltip,ResponsiveContainer,BarChart,Bar,XAxis,YAxis,CartesianGrid,ReferenceLine}=Recharts;
-
-const DEF_GOALS={calories:2000,protein:50,carbs:275,fat:78,fiber:28,sugar:50,sodium:2300};
-const DEF_PROFILE={weight:0,heightFeet:0,heightInches:0,age:0,gender:"",goalWeight:0,activityLevel:"moderate",weeklyWeightLoss:1,weigh_ins:[]};
-const MEALS=["Breakfast","Lunch","Dinner","Snack"];
-const MI={Breakfast:"🌅",Lunch:"☀️",Dinner:"🌙",Snack:"🍎"};
-const MC=["#60a5fa","#fbbf24","#f87171"];
-const OZ=28.3495;
-const ACTIVITY_LEVELS={sedentary:1.2,lightly:1.375,moderate:1.55,very:1.725,extra:1.9};
-const ACTIVITY_LABELS={sedentary:"Sedentary (little/no exercise)",lightly:"Lightly active (1-3 days/week)",moderate:"Moderately active (3-5 days/week)",very:"Very active (6-7 days/week)",extra:"Extra active (physical job/sports)"};
-
-const toG=(v,u)=>u==="oz"?v*OZ:v;
-const toD=(g,u)=>u==="oz"?+(g/OZ).toFixed(2):Math.round(g);
-const localDateStr=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-const todayStr=()=>localDateStr();
-const last7=()=>Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return localDateStr(d);});
-const sumLog=es=>es.reduce((a,e)=>({
-  calories:a.calories+(e.calories||0),protein:a.protein+(e.protein||0),
-  carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0),
-  fiber:a.fiber+(e.fiber||0),sodium:a.sodium+(e.sodium||0),sugar:a.sugar+(e.sugar||0),
-}),{calories:0,protein:0,carbs:0,fat:0,fiber:0,sodium:0,sugar:0});
-const calc=(p,g)=>({
-  calories:Math.round((p.calories||0)*g/100),
-  protein:+((p.protein||0)*g/100).toFixed(1),
-  carbs:+((p.carbs||0)*g/100).toFixed(1),
-  fat:+((p.fat||0)*g/100).toFixed(1),
-  fiber:+((p.fiber||0)*g/100).toFixed(1),
-  sodium:Math.round((p.sodium||0)*g/100),
-  sugar:+((p.sugar||0)*g/100).toFixed(1),
-});
-
-const USDA_KEY="REPLACE_ME_WITH_REAL_KEY";
-const store={
-  get:k=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}},
-  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}},
-};
-
-function normalizeUSDA(food){
-  const get=id=>food.foodNutrients?.find(n=>n.nutrientId===id)?.value||0;
-  let suggestedG=null,suggestedLabel=null;
-  if(food.servingSize&&food.servingSizeUnit){
-    const u=food.servingSizeUnit.toLowerCase();
-    if(["g","grm","gram"].includes(u)){suggestedG=food.servingSize;suggestedLabel=`${food.servingSize}g`;}
-    else if(["oz","ounce"].includes(u)){suggestedG=food.servingSize*OZ;suggestedLabel=`${food.servingSize}oz`;}
-  }
-  return{
-    _source:"usda",code:String(food.fdcId),
-    product_name:food.description.split(",").map(s=>s.trim()).map((s,i)=>i===0?s.charAt(0).toUpperCase()+s.slice(1).toLowerCase():s.toLowerCase()).join(", "),
-    brands:food.brandOwner||food.brandName||"",
-    suggestedG,suggestedLabel,
-    nutriments:{"energy-kcal_100g":get(1008),proteins_100g:get(1003),carbohydrates_100g:get(1005),fat_100g:get(1004),fiber_100g:get(1079),sugars_100g:get(2000),sodium_100g:get(1093)/1000},
-  };
-}
-
-function getRecentFoods(query,currentLog){
-  const allEntries=[...currentLog];
-  for(const d of last7()){const s=store.get(`ntr-log-${d}`);if(s)allEntries.push(...s);}
-  if(!allEntries.length||!query.trim())return[];
-  const q=query.toLowerCase();
-  const seen=new Map();
-  for(const e of [...allEntries].reverse()){
-    const key=(e.name||"").toLowerCase();
-    if(!seen.has(key))seen.set(key,e);
-  }
-  return[...seen.values()].filter(e=>e.name&&e.name.toLowerCase().includes(q)&&e.per100g).map(e=>({
-    _source:"history",_historyBadge:true,
-    code:`history-${e.name}`,
-    product_name:e.name,brands:e.brand||"",
-    suggestedG:e.qty,suggestedLabel:`${e.qty}g (last used)`,
-    nutriments:{
-      "energy-kcal_100g":e.per100g.calories||0,proteins_100g:e.per100g.protein||0,
-      carbohydrates_100g:e.per100g.carbs||0,fat_100g:e.per100g.fat||0,
-      fiber_100g:e.per100g.fiber||0,sugars_100g:e.per100g.sugar||0,
-      sodium_100g:(e.per100g.sodium||0)/1000,
-    },
-  }));
-}
-
-function QtyInput({value,onChange,unit,onUnitChange}){
-  return(
-    <div className="flex flex-1 border border-gray-200 rounded-lg overflow-hidden">
-      <input type="number" min="0" step="any" value={value}
-        onChange={e=>onChange(e.target.value)}
-        onBlur={e=>{const n=parseFloat(e.target.value);onChange(isNaN(n)||n<=0?"1":String(n));}}
-        className="flex-1 px-2 py-1.5 text-sm outline-none min-w-0"/>
-      <div className="flex border-l border-gray-200">
-        {["g","oz"].map(u=>(
-          <button key={u} onClick={()=>onUnitChange(u)}
-            className={`px-2 text-xs font-semibold transition-colors ${unit===u?"bg-emerald-500 text-white":"bg-gray-50 text-gray-400 hover:bg-gray-100"}`}>
-            {u}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FoodCard({item,meal,onAdd}){
-  const n=item.nutriments||{};
-  const per100g={calories:n["energy-kcal_100g"]||0,protein:n.proteins_100g||0,carbs:n.carbohydrates_100g||0,fat:n.fat_100g||0,fiber:n.fiber_100g||0,sodium:(n.sodium_100g||0)*1000,sugar:n.sugars_100g||0};
-  const [qs,setQs]=useState(item.suggestedG?String(Math.round(item.suggestedG)):"100");
-  const [unit,setUnit]=useState("g");
-  const handleUnit=u=>{const g=toG(parseFloat(qs)||1,unit);setQs(String(toD(g,u)));setUnit(u);};
-  const grams=toG(parseFloat(qs)||1,unit);
-  const nutr=calc(per100g,grams);
-  return(
-    <div className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-      <div className="flex justify-between gap-2 mb-1">
-        <div className="min-w-0">
-          <p className="font-semibold text-sm text-gray-800 truncate">{item.product_name}</p>
-          <p className="text-xs text-gray-400 truncate">{item.brands||""}</p>
-        </div>
-        <span className="text-xs bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-full h-fit whitespace-nowrap shrink-0">{nutr.calories} kcal</span>
-      </div>
-      <div className="flex flex-wrap gap-x-3 text-xs text-gray-500 mb-2">
-        <span>P <b className="text-blue-500">{nutr.protein}g</b></span>
-        <span>C <b className="text-yellow-500">{nutr.carbs}g</b></span>
-        <span>F <b className="text-red-400">{nutr.fat}g</b></span>
-        <span>Fi <b className="text-green-500">{nutr.fiber}g</b></span>
-        <span>Su <b className="text-pink-400">{nutr.sugar}g</b></span>
-        <span>Na <b className="text-purple-400">{nutr.sodium}mg</b></span>
-      </div>
-      {item.suggestedG&&(
-        <button onClick={()=>{setUnit("g");setQs(String(Math.round(item.suggestedG)));}}
-          className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mb-2 hover:bg-emerald-100 transition-colors block">
-          📏 Suggested: {item.suggestedLabel}
-        </button>
-      )}
-      <div className="flex gap-2">
-        <QtyInput value={qs} onChange={setQs} unit={unit} onUnitChange={handleUnit}/>
-        <button onClick={()=>onAdd(item,grams,per100g)}
-          className="bg-emerald-500 hover:bg-emerald-600 text-white text-sm px-3 py-1.5 rounded-lg font-semibold whitespace-nowrap">
-          + {MI[meal]}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function EditModal({entry,onSave,onClose}){
-  const [qs,setQs]=useState(String(entry.qty));
-  const [unit,setUnit]=useState("g");
-  const [meal,setMeal]=useState(entry.meal);
-  const [date,setDate]=useState(entry._date||todayStr());
-  const handleUnit=u=>{const g=toG(parseFloat(qs)||1,unit);setQs(String(toD(g,u)));setUnit(u);};
-  const grams=toG(parseFloat(qs)||1,unit);
-  const per100g=entry.per100g||{};
-  const nutr=calc(per100g,grams);
-  return(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{background:"rgba(0,0,0,0.6)"}}>
-      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
-        <div className="flex justify-between items-center px-4 py-3 border-b border-gray-100">
-          <p className="font-bold text-gray-800 text-sm">✏️ Edit Entry</p>
-          <button onClick={onClose} className="text-gray-400 text-xl font-bold">✕</button>
-        </div>
-        <div className="p-4">
-          <p className="font-semibold text-sm text-gray-800 mb-0.5 truncate">{entry.name}</p>
-          <p className="text-xs text-gray-400 mb-3">{nutr.calories} kcal · P{nutr.protein} C{nutr.carbs} F{nutr.fat}g</p>
-          <p className="text-xs font-semibold text-gray-500 mb-1">Date</p>
-          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-400 mb-3"/>
-          <p className="text-xs font-semibold text-gray-500 mb-1">Serving size</p>
-          <div className="mb-3"><QtyInput value={qs} onChange={setQs} unit={unit} onUnitChange={handleUnit}/></div>
-          <p className="text-xs font-semibold text-gray-500 mb-1">Meal</p>
-          <div className="flex gap-1.5 mb-4 flex-wrap">
-            {MEALS.map(m=>(
-              <button key={m} onClick={()=>setMeal(m)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${meal===m?"bg-emerald-500 text-white":"bg-gray-100 text-gray-500"}`}>
-                {MI[m]} {m}
-              </button>
-            ))}
+                  <video ref={videoCallback} autoPlay playsInline muted className="w-full object-cover" style={{aspectRatio:"16/9"}}/>
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="border-2 border-emerald-400 w-48 h-24 rounded-lg opacity-80"/>
+                  </div>
+                </div>
+                <p className="text-center text-xs text-gray-500 py-3">Point at a barcode — auto detects</p>
+                <div className="px-4 pb-4 text-center">
+                  <button onClick={()=>setScanMode("manual")} className="text-xs text-emerald-600 underline">Enter manually</button>
+                </div>
+              </div>
+            ):(
+              <div className="p-4">
+                <p className="text-sm text-gray-600 mb-3">Enter the barcode number:</p>
+                <input value={barcodeInput} onChange={e=>setBarcodeInput(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&lookupBarcode(barcodeInput)}
+                  placeholder="e.g. 3017620422003"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-emerald-400 mb-3"/>
+                <button onClick={()=>lookupBarcode(barcodeInput)} disabled={!barcodeInput.trim()||loading}
+                  className="w-full bg-emerald-500 disabled:opacity-50 text-white py-2.5 rounded-xl font-bold text-sm">
+                  {loading?"Looking up…":"Look Up Product"}
+                </button>
+              </div>
+            )}
           </div>
-          <button onClick={()=>onSave({...entry,qty:Math.round(grams),meal,...nutr,_date:date},entry._date||todayStr())}
-            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-2.5 rounded-xl font-bold text-sm">
-            Save Changes
-          </button>
         </div>
-      </div>
+      )}
+
+      {toast&&(
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-xs px-4 py-2 rounded-full shadow-xl z-50 whitespace-nowrap">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
 
-function MiniBar({label,value,goal,color}){
-  const pct=Math.min(100,(value/goal)*100),over=value>goal;
-  return(
-    <div>
-      <div className="flex justify-between text-xs mb-0.5">
-        <span className="text-gray-600">{label}</span>
-        <span className={over?"text-red-500 font-bold":"text-gray-400"}>{Math.round(value)}/{goal}</span>
-      </div>
-      <div className="h-1.5 bg-gray-100 rounded-full">
-        <div className={`h-full rounded-full transition-all ${over?"bg-red-400":color}`} style={{width:`${pct}%`}}/>
-      </div>
-    </div>
-  );
-}
-
-function App(){
-  const [tab,setTab]=useState("search");
-  const [query,setQuery]=useState("");
-  const [results,setResults]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState("");
-  const [meal,setMeal]=useState("Breakfast");
-  const [log,setLog]=useState([]);
-  const [history,setHistory]=useState({});
-  const [goals,setGoals]=useState(DEF_GOALS);
-  const [goalDraft,setGoalDraft]=useState(DEF_GOALS);
-  const [showScanner,setShowScanner]=useState(false);
-  const [scanMode,setScanMode]=useState("camera");
-  const [barcodeInput,setBarcodeInput]=useState("");
-  const [toast,setToast]=useState("");
-  const [offline,setOffline]=useState(!navigator.onLine);
-  const [editEntry,setEditEntry]=useState(null);
-  const [profile,setProfile]=useState(DEF_PROFILE);
-  const [profileDraft,setProfileDraft]=useState(DEF_PROFILE);
-  const [weighInDate,setWeighInDate]=useState(todayStr());
-  const [weighInWeight,setWeighInWeight]=useState("");
-  const videoRef=useRef(null);
-  const streamRef=useRef(null);
-
-  useEffect(()=>{
-    const g=store.get("ntr-goals");if(g){setGoals(g);setGoalDraft(g);}
-    const p=store.get("ntr-profile");if(p){setProfile(p);setProfileDraft(p);}
-    const l=store.get(`ntr-log-${todayStr()}`);if(l)setLog(l);
-    const on=()=>setOffline(false),off=()=>setOffline(true);
-    window.addEventListener("online",on);window.addEventListener("offline",off);
-    return()=>{window.removeEventListener("online",on);window.removeEventListener("offline",off);};
-  },[]);
-
-  useEffect(()=>{
-    if(tab!=="history")return;
-    const h={};
-    for(const d of last7())h[d]=store.get(`ntr-log-${d}`)||[];
-    h[todayStr()]=log;setHistory(h);
-  },[tab,log]);
-
-  const saveLog=nl=>{setLog(nl);store.set(`ntr-log-${todayStr()}`,nl);};
-  const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
-
-  const getTotalHeight=p=>p.heightFeet*12+(p.heightInches||0);
-
-  const calcBMI=p=>{
-    const h=getTotalHeight(p);
-    if(!p.weight||!h)return null;
-    return parseFloat((p.weight/(h*h)*703).toFixed(1));
-  };
-
-  const calcBMR=p=>{
-    const h=getTotalHeight(p);
-    if(!p.weight||!h||!p.age||!p.gender)return null;
-    const kg=p.weight/2.20462,cm=h*2.54;
-    return p.gender==="male"?Math.round(10*kg+6.25*cm-5*p.age+5):Math.round(10*kg+6.25*cm-5*p.age-161);
-  };
-
-  const calcTDEE=p=>{
-    const bmr=calcBMR(p);if(!bmr)return null;
-    return Math.round(bmr*(ACTIVITY_LEVELS[p.activityLevel]||1.55));
-  };
-
-  const calcAutoGoals=p=>{
-    const tdee=calcTDEE(p);if(!tdee)return null;
-    const deficit=p.weeklyWeightLoss*3500/7;
-    const targetCals=Math.max(tdee-deficit,1200);
-    return{calories:Math.round(targetCals),protein:Math.round(targetCals*0.3/4),carbs:Math.round(targetCals*0.4/4),fat:Math.round(targetCals*0.3/9),fiber:28,sugar:50,sodium:2300};
-  };
-
-  const calcWeightLoss=p=>{
-    if(!p.weight||!p.goalWeight||p.goalWeight>=p.weight)return null;
-    const totalLoss=p.weight-p.goalWeight;
-    const weeksNeeded=Math.ceil(totalLoss/p.weeklyWeightLoss);
-    return{totalLoss:totalLoss.toFixed(1),weeksNeeded,dailyDeficit:Math.round((totalLoss*3500)/(weeksNeeded*7)),projectedDate:new Date(Date.now()+weeksNeeded*7*24*3600*1000).toLocaleDateString()};
-  };
-
-  // FIX: auto-save weigh-ins immediately to localStorage so they survive refresh
-  const addWeighIn=(date,weight)=>{
-    if(!weight)return;
-    const newWeighIns=[...(profileDraft.weigh_ins||[]).filter(w=>w.date!==date),{date,weight:Number(weight)}].sort((a,b)=>new Date(a.date)-new Date(b.date));
-    const updated={...profileDraft,weigh_ins:newWeighIns,weight:Number(weight)};
-    setProfileDraft(updated);
-    setProfile(prev=>({...prev,weigh_ins:newWeighIns,weight:Number(weight)}));
-    store.set("ntr-profile",updated);
-    setWeighInDate(todayStr());
-    setWeighInWeight("");
-    showToast(`Weigh-in recorded: ${weight} lbs on ${date}`);
-  };
-
-  const exportBackup=()=>{
-    const blob=new Blob([JSON.stringify({profile,goals},null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement("a");a.href=url;a.download=`nutritrack-backup-${todayStr()}.json`;a.click();
-    URL.revokeObjectURL(url);showToast("Backup downloaded! ✓");
-  };
-
-  const importBackup=e=>{
-    const file=e.target.files?.[0];if(!file)return;
-    const reader=new FileReader();
-    reader.onload=evt=>{
-      try{
-        const data=JSON.parse(evt.target.result);
-        if(data.profile&&data.goals){
-          setProfile(data.profile);setProfileDraft(data.profile);
-          setGoals(data.goals);setGoalDraft(data.goals);
-          store.set("ntr-profile",data.profile);store.set("ntr-goals",data.goals);
-          showToast("Backup restored! ✓");
-        }else showToast("Invalid backup file");
-      }catch{showToast("Error reading backup file");}
-    };
-    reader.readAsText(file);e.target.value="";
-  };
-
-  const doSearch=async q=>{
-    if(!q.trim())return;
-    setLoading(true);setError("");setResults([]);
-    const recent=getRecentFoods(q,log);
-    if(recent.length)setResults(recent);
-    try{
-      const enc=encodeURIComponent;
-      const base=`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${USDA_KEY}&pageSize=50&query=${enc(q)}`;
-      const [gR,bR,oR]=await Promise.allSettled([
-        fetch(`${base}&dataType=Foundation&dataType=SR%20Legacy&dataType=Survey%20%28FNDDS%29`).then(r=>r.json()),
-        fetch(`${base}&dataType=Branded`).then(r=>r.json()),
-        fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${enc(q)}&json=1&page_size=8&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
-      ]);
-      const generic=gR.status==="fulfilled"?(gR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
-      const uBranded=bR.status==="fulfilled"?(bR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
-      const off=oR.status==="fulfilled"?(oR.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0):[];
-      const gNames=new Set(generic.map(p=>p.product_name.toLowerCase().slice(0,20)));
-      const uBU=uBranded.filter(p=>!gNames.has(p.product_name.toLowerCase().slice(0,20)));
-      const bNames=new Set(uBU.map(p=>p.product_name.toLowerCase().slice(0,20)));
-      const offU=off.filter(p=>!bNames.has((p.product_name||"").toLowerCase().slice(0,20)));
-      const branded=[],len=Math.max(uBU.length,offU.length);
-      for(let i=0;i<len;i++){if(uBU[i])branded.push(uBU[i]);if(offU[i])branded.push(offU[i]);}
-      const recentNames=new Set(recent.map(r=>r.product_name.toLowerCase().slice(0,20)));
-      const apiMerged=[...generic,...branded].filter(p=>!recentNames.has(p.product_name.toLowerCase().slice(0,20)));
-      const merged=[...recent,...apiMerged];
-      setResults(merged);
-      if(!merged.length)setError("No results found. Try a different term.");
-    }catch{if(!recent.length)setError("Search failed. Check your connection.");}
-    setLoading(false);
-  };
-
-  const lookupBarcode=async code=>{
-    setLoading(true);
-    try{
-      const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-      const d=await r.json();
-      if(d.status===1&&d.product?.nutriments?.["energy-kcal_100g"]){
-        setResults([d.product]);setTab("search");setShowScanner(false);
-        showToast(`Found: ${d.product.product_name}`);
-      }else setError("Product not found.");
-    }catch{setError("Lookup failed.");}
-    setLoading(false);setShowScanner(false);
-  };
-
-  useEffect(()=>{
-    if(!showScanner||scanMode!=="camera")return;
-    let stream,interval;
-    (async()=>{
-      if(!("Barcode
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+<script>
+  let dp;
+  const ib=document.getElementById("ib");
+  window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();dp=e;if(!localStorage.getItem("pwa-dismissed"))ib.style.display="flex";});
+  document.getElementById("ibtn").addEventListener("click",async()=>{ib.style.display="none";dp.prompt();await dp.userChoice;dp=null;});
+  document.getElementById("dbtn").addEventListener("click",()=>{ib.style.display="none";localStorage.setItem("pwa-dismissed","1");});
+  window.addEventListener("appinstalled",()=>{ib.style.display="none";});
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("./sw.js",{scope:"./"})
+      .then(r=>console.log("SW registered:",r.scope))
+      .catch(e=>console.warn("SW failed:",e));
+  }
+</script>
+</body>
+</html>
