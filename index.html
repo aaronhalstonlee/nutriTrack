@@ -249,6 +249,7 @@ function App(){
   const [profileDraft,setProfileDraft]=useState(DEF_PROFILE);
   const [weighInDate,setWeighInDate]=useState(todayStr());
   const [weighInWeight,setWeighInWeight]=useState("");
+  const [expandedHistoryDay,setExpandedHistoryDay]=useState(null);
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
@@ -630,25 +631,57 @@ function App(){
               </ResponsiveContainer>
             </div>
             {last7().slice().reverse().map(d=>{
-              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr();
+              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr(),isExpanded=expandedHistoryDay===d;
               return(
-                <div key={d} className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm ${isToday?"border-emerald-200":"border-gray-100"}`}>
-                  <div className="flex justify-between items-center mb-1">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
-                      <p className="text-xs text-gray-400">{entries.length} items</p>
+                <div key={d}>
+                  <div onClick={()=>setExpandedHistoryDay(isExpanded?null:d)} 
+                    className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm cursor-pointer hover:shadow-md transition-shadow ${isToday?"border-emerald-200":"border-gray-100"}`}>
+                    <div className="flex justify-between items-center mb-1">
+                      <div className="flex items-center gap-2 flex-1">
+                        <span className={`text-lg transition-transform ${isExpanded?"rotate-90":"rotate-0"}`}>›</span>
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
+                          <p className="text-xs text-gray-400">{entries.length} items</p>
+                        </div>
+                      </div>
+                      <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
+                        <p className="font-black text-lg leading-none">{t.calories}</p>
+                        <p className="text-xs text-gray-400">kcal</p>
+                      </div>
                     </div>
-                    <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
-                      <p className="font-black text-lg leading-none">{t.calories}</p>
-                      <p className="text-xs text-gray-400">kcal</p>
-                    </div>
+                    {entries.length>0&&(
+                      <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
+                        <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
+                        <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
+                        <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
+                        <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
+                      </div>
+                    )}
                   </div>
-                  {entries.length>0&&(
-                    <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
-                      <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
-                      <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
-                      <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
-                      <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
+                  {isExpanded && entries.length>0 && (
+                    <div className="bg-gray-50 rounded-xl p-3 mb-2">
+                      {MEALS.map(m=>{
+                        const items=entries.filter(e=>e.meal===m);if(!items.length)return null;
+                        const mCal=items.reduce((a,e)=>a+e.calories,0);
+                        return(
+                          <div key={m} className="mb-3 last:mb-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-sm">{MI[m]}</span>
+                              <p className="font-semibold text-xs text-gray-700">{m}</p>
+                              <span className="text-xs text-gray-400 ml-auto">{mCal} kcal</span>
+                            </div>
+                            {items.map(e=>(
+                              <div key={e.id} className="flex items-center gap-2 py-1.5 px-2 bg-white rounded-lg mb-1 text-xs">
+                                <div className="flex-1 min-w-0 cursor-pointer" onClick={()=>setEditEntry(e)}>
+                                  <p className="text-gray-800 font-medium truncate">{e.name}</p>
+                                  <p className="text-gray-400">{e.qty}g · {e.time} · P{e.protein} C{e.carbs} F{e.fat}g</p>
+                                </div>
+                                <span className="font-bold text-orange-500 shrink-0">{e.calories}</span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
