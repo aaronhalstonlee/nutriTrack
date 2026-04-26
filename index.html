@@ -254,6 +254,7 @@ function App(){
   const [profileDraft,setProfileDraft]=useState(DEF_PROFILE);
   const [weighInDate,setWeighInDate]=useState(todayStr());
   const [weighInWeight,setWeighInWeight]=useState("");
+  const [expandedDay,setExpandedDay]=useState(todayStr());
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
@@ -455,7 +456,7 @@ function App(){
       <div className="bg-white border-b border-gray-100 px-4 pt-4 pb-3 sticky top-0 z-20 shadow-sm">
         <div className="flex justify-between items-center mb-2">
           <div>
-            <h1 className="text-lg font-bold text-gray-900">🥗 NutriTrack v12</h1>
+            <h1 className="text-lg font-bold text-gray-900">🥗 NutriTrack v13</h1>
             <p className="text-xs text-gray-400">USDA · Open Food Facts</p>
           </div>
           <div className={`text-right ${calLeft<0?"text-red-500":"text-emerald-600"}`}>
@@ -653,20 +654,23 @@ function App(){
               </ResponsiveContainer>
             </div>
             {last7().slice().reverse().map(d=>{
-              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr();
+              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr(),isExpanded=expandedDay===d;
               return(
                 <div key={d} className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm ${isToday?"border-emerald-200":"border-gray-100"}`}>
-                  <div className="flex justify-between items-center mb-1">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
-                      <p className="text-xs text-gray-400">{entries.length} items</p>
+                  <div onClick={()=>setExpandedDay(isExpanded?null:d)} className="flex justify-between items-center mb-1 cursor-pointer hover:opacity-80 transition-opacity">
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-xs text-gray-400">{isExpanded?"▼":"▶"}</span>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
+                        <p className="text-xs text-gray-400">{entries.length} items</p>
+                      </div>
                     </div>
                     <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
                       <p className="font-black text-lg leading-none">{t.calories}</p>
                       <p className="text-xs text-gray-400">kcal</p>
                     </div>
                   </div>
-                  {entries.length>0&&(
+                  {isExpanded&&entries.length>0&&(
                     <>
                       <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50 mb-2">
                         <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
