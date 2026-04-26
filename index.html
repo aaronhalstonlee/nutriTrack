@@ -49,9 +49,9 @@ const ACTIVITY_LABELS={sedentary:"Sedentary (little/no exercise)",lightly:"Light
 
 const toG=(v,u)=>u==="oz"?v*OZ:v;
 const toD=(g,u)=>u==="oz"?+(g/OZ).toFixed(2):Math.round(g);
-const todayStr=()=>new Date().toISOString().slice(0,10);
-const last7=()=>Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d.toISOString().slice(0,10);});
-const hasCompleteNutrition=item=>{const n=item.nutriments||{};return n["energy-kcal_100g"]>0&&typeof n.proteins_100g==="number"&&typeof n.carbohydrates_100g==="number"&&typeof n.fat_100g==="number";};
+const localDateStr=(d=new Date())=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const todayStr=()=>localDateStr();
+const last7=()=>Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return localDateStr(d);});
 const sumLog=es=>es.reduce((a,e)=>({
   calories:a.calories+(e.calories||0),protein:a.protein+(e.protein||0),
   carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0),
@@ -250,7 +250,6 @@ function App(){
   const [profileDraft,setProfileDraft]=useState(DEF_PROFILE);
   const [weighInDate,setWeighInDate]=useState(todayStr());
   const [weighInWeight,setWeighInWeight]=useState("");
-  const [expandedHistoryDay,setExpandedHistoryDay]=useState(null);
   const videoRef=useRef(null);
   const streamRef=useRef(null);
 
@@ -357,15 +356,17 @@ function App(){
         fetch(`${base}&dataType=Branded`).then(r=>r.json()),
         fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${enc(q)}&json=1&page_size=8&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
       ]);
-      const generic=gR.status==="fulfilled"?(gR.value.foods||[]).map(normalizeUSDA).filter(hasCompleteNutrition):[];
-      const uBranded=bR.status==="fulfilled"?(bR.value.foods||[]).map(normalizeUSDA).filter(hasCompleteNutrition):[];
-      const off=oR.status==="fulfilled"?(oR.value.products||[]).filter(p=>p.product_name&&hasCompleteNutrition({nutriments:p.nutriments})):[];
+      const generic=gR.status==="fulfilled"?(gR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
+      const uBranded=bR.status==="fulfilled"?(bR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
+      const off=oR.status==="fulfilled"?(oR.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0):[];
       const gNames=new Set(generic.map(p=>p.product_name.toLowerCase().slice(0,20)));
       const uBU=uBranded.filter(p=>!gNames.has(p.product_name.toLowerCase().slice(0,20)));
       const bNames=new Set(uBU.map(p=>p.product_name.toLowerCase().slice(0,20)));
       const offU=off.filter(p=>!bNames.has((p.product_name||"").toLowerCase().slice(0,20)));
+      const branded=[],len=Math.max(uBU.length,offU.length);
+      for(let i=0;i<len;i++){if(uBU[i])branded.push(uBU[i]);if(offU[i])branded.push(offU[i]);}
       const recentNames=new Set(recent.map(r=>r.product_name.toLowerCase().slice(0,20)));
-      const apiMerged=[...generic,...uBU,...offU].filter(p=>!recentNames.has(p.product_name.toLowerCase().slice(0,20)));
+      const apiMerged=[...generic,...branded].filter(p=>!recentNames.has(p.product_name.toLowerCase().slice(0,20)));
       const merged=[...recent,...apiMerged];
       setResults(merged);
       if(!merged.length)setError("No results found. Try a different term.");
@@ -630,57 +631,25 @@ function App(){
               </ResponsiveContainer>
             </div>
             {last7().slice().reverse().map(d=>{
-              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr(),isExpanded=expandedHistoryDay===d;
+              const entries=history[d]||[],t=sumLog(entries),isToday=d===todayStr();
               return(
-                <div key={d}>
-                  <div onClick={()=>setExpandedHistoryDay(isExpanded?null:d)} 
-                    className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm cursor-pointer hover:shadow-md transition-shadow ${isToday?"border-emerald-200":"border-gray-100"}`}>
-                    <div className="flex justify-between items-center mb-1">
-                      <div className="flex items-center gap-2 flex-1">
-                        <span className={`text-lg transition-transform ${isExpanded?"rotate-90":"rotate-0"}`}>›</span>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
-                          <p className="text-xs text-gray-400">{entries.length} items</p>
-                        </div>
-                      </div>
-                      <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
-                        <p className="font-black text-lg leading-none">{t.calories}</p>
-                        <p className="text-xs text-gray-400">kcal</p>
-                      </div>
+                <div key={d} className={`bg-white rounded-2xl border p-3 mb-2 shadow-sm ${isToday?"border-emerald-200":"border-gray-100"}`}>
+                  <div className="flex justify-between items-center mb-1">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{isToday?"Today ●":d}</p>
+                      <p className="text-xs text-gray-400">{entries.length} items</p>
                     </div>
-                    {entries.length>0&&(
-                      <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
-                        <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
-                        <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
-                        <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
-                        <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
-                      </div>
-                    )}
+                    <div className={`text-right ${t.calories>goals.calories?"text-red-500":"text-gray-700"}`}>
+                      <p className="font-black text-lg leading-none">{t.calories}</p>
+                      <p className="text-xs text-gray-400">kcal</p>
+                    </div>
                   </div>
-                  {isExpanded && entries.length>0 && (
-                    <div className="bg-gray-50 rounded-xl p-3 mb-2">
-                      {MEALS.map(m=>{
-                        const items=entries.filter(e=>e.meal===m);if(!items.length)return null;
-                        const mCal=items.reduce((a,e)=>a+e.calories,0);
-                        return(
-                          <div key={m} className="mb-3 last:mb-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-sm">{MI[m]}</span>
-                              <p className="font-semibold text-xs text-gray-700">{m}</p>
-                              <span className="text-xs text-gray-400 ml-auto">{mCal} kcal</span>
-                            </div>
-                            {items.map(e=>(
-                              <div key={e.id} className="flex items-center gap-2 py-1.5 px-2 bg-white rounded-lg mb-1 text-xs">
-                                <div className="flex-1 min-w-0 cursor-pointer" onClick={()=>setEditEntry(e)}>
-                                  <p className="text-gray-800 font-medium truncate">{e.name}</p>
-                                  <p className="text-gray-400">{e.qty}g · {e.time} · P{e.protein} C{e.carbs} F{e.fat}g</p>
-                                </div>
-                                <span className="font-bold text-orange-500 shrink-0">{e.calories}</span>
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })}
+                  {entries.length>0&&(
+                    <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
+                      <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
+                      <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
+                      <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
+                      <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
                     </div>
                   )}
                 </div>
