@@ -667,12 +667,27 @@ function App(){
                     </div>
                   </div>
                   {entries.length>0&&(
-                    <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50">
-                      <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
-                      <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
-                      <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
-                      <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
-                    </div>
+                    <>
+                      <div className="flex gap-3 text-xs text-gray-500 mt-1.5 pt-1.5 border-t border-gray-50 mb-2">
+                        <span>P <b className="text-blue-400">{Math.round(t.protein)}g</b></span>
+                        <span>C <b className="text-yellow-500">{Math.round(t.carbs)}g</b></span>
+                        <span>F <b className="text-red-400">{Math.round(t.fat)}g</b></span>
+                        <span>Na <b className="text-purple-400">{Math.round(t.sodium)}mg</b></span>
+                      </div>
+                      <div className="space-y-1.5 mt-2">
+                        {entries.map(e=>(
+                          <div key={e.id} className="flex items-center gap-2 py-1.5 px-2 bg-gray-50 rounded-lg">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-gray-700 font-medium truncate">{e.name}</p>
+                              <p className="text-xs text-gray-400">{e.qty}g · {e.time} · P{e.protein} C{e.carbs}g</p>
+                            </div>
+                            <span className="text-xs font-bold text-orange-500 shrink-0">{e.calories}</span>
+                            <button onClick={()=>setEditEntry({...e,_date:d})} className="text-gray-300 hover:text-blue-400 transition-colors text-sm">✏️</button>
+                            <button onClick={()=>{const origLog=(store.get(`ntr-log-${d}`)||[]).filter(x=>x.id!==e.id);store.set(`ntr-log-${d}`,origLog);if(d===todayStr())setLog(origLog);setHistory(prev=>({...prev,[d]:origLog}));showToast("Entry deleted ✓");}} className="text-gray-300 hover:text-red-400 transition-colors text-sm">✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
               );
