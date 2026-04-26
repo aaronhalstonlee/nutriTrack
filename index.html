@@ -51,6 +51,7 @@ const toG=(v,u)=>u==="oz"?v*OZ:v;
 const toD=(g,u)=>u==="oz"?+(g/OZ).toFixed(2):Math.round(g);
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const last7=()=>Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));return d.toISOString().slice(0,10);});
+const hasCompleteNutrition=item=>{const n=item.nutriments||{};return n["energy-kcal_100g"]>0&&typeof n.proteins_100g==="number"&&typeof n.carbohydrates_100g==="number"&&typeof n.fat_100g==="number";};
 const sumLog=es=>es.reduce((a,e)=>({
   calories:a.calories+(e.calories||0),protein:a.protein+(e.protein||0),
   carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0),
@@ -356,17 +357,15 @@ function App(){
         fetch(`${base}&dataType=Branded`).then(r=>r.json()),
         fetch(`https://us.openfoodfacts.org/cgi/search.pl?search_terms=${enc(q)}&json=1&page_size=8&fields=product_name,brands,nutriments,code`).then(r=>r.json()),
       ]);
-      const generic=gR.status==="fulfilled"?(gR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
-      const uBranded=bR.status==="fulfilled"?(bR.value.foods||[]).map(normalizeUSDA).filter(p=>p.nutriments["energy-kcal_100g"]>0):[];
-      const off=oR.status==="fulfilled"?(oR.value.products||[]).filter(p=>p.product_name&&p.nutriments?.["energy-kcal_100g"]>0):[];
+      const generic=gR.status==="fulfilled"?(gR.value.foods||[]).map(normalizeUSDA).filter(hasCompleteNutrition):[];
+      const uBranded=bR.status==="fulfilled"?(bR.value.foods||[]).map(normalizeUSDA).filter(hasCompleteNutrition):[];
+      const off=oR.status==="fulfilled"?(oR.value.products||[]).filter(p=>p.product_name&&hasCompleteNutrition({nutriments:p.nutriments})):[];
       const gNames=new Set(generic.map(p=>p.product_name.toLowerCase().slice(0,20)));
       const uBU=uBranded.filter(p=>!gNames.has(p.product_name.toLowerCase().slice(0,20)));
       const bNames=new Set(uBU.map(p=>p.product_name.toLowerCase().slice(0,20)));
       const offU=off.filter(p=>!bNames.has((p.product_name||"").toLowerCase().slice(0,20)));
-      const branded=[],len=Math.max(uBU.length,offU.length);
-      for(let i=0;i<len;i++){if(uBU[i])branded.push(uBU[i]);if(offU[i])branded.push(offU[i]);}
       const recentNames=new Set(recent.map(r=>r.product_name.toLowerCase().slice(0,20)));
-      const apiMerged=[...generic,...branded].filter(p=>!recentNames.has(p.product_name.toLowerCase().slice(0,20)));
+      const apiMerged=[...generic,...uBU,...offU].filter(p=>!recentNames.has(p.product_name.toLowerCase().slice(0,20)));
       const merged=[...recent,...apiMerged];
       setResults(merged);
       if(!merged.length)setError("No results found. Try a different term.");

@@ -1,4 +1,4 @@
-const CACHE = "nutritrack-v6";
+const CACHE = "nutritrack-v7";
 const SHELL = [
   "./", 
   "./index.html",
